@@ -2,7 +2,7 @@
 #include <cstdarg>
 #include <cwchar>
 
-#include <efi/efi.h>
+#include <shared/efi/efi.h>
 #include <efi/efi_datatypes.h>
 
 #include <ldstdio.hpp>

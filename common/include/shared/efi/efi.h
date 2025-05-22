@@ -326,10 +326,7 @@ typedef enum : uint32_t {
     EfiMemoryMappedIOPortSpace,
     EfiPalCode,
     EfiPersistentMemory,
-    EfiUnacceptedMemoryType,
-
-    LoaderPersistentMemory  = 0x80000000,
-    LoaderTemporaryMemory   = 0x80000001
+    EfiUnacceptedMemoryType
 } EFI_MEMORY_TYPE;
 
 struct EFI_MEMORY_DESCRIPTOR {

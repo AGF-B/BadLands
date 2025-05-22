@@ -1,6 +1,6 @@
 #include <efi/efi_datatypes.h>
 #include <efi/efi_misc.hpp>
-#include <efi/efi.h>
+#include <shared/efi/efi.h>
 
 #include <ldstdio.hpp>
 #include <ldstdlib.hpp>
@@ -29,7 +29,7 @@ int Loader::guidcmp(const EFI_GUID* _guid1, const EFI_GUID* _guid2) {
 [[noreturn]] void EFI::Terminate(void) {
     Loader::puts(u"\n\rPress a key to terminate.\n\r");
     readkey();
-    EFI::sys->RuntimeServices->ResetSystem(EfiResetShutdown, EFI_SUCCESS, 0, nullptr);
+    EFI::sys->RuntimeServices->ResetSystem(EfiResetShutdown, EFI_ABORTED, 0, nullptr);
     Loader::puts(u"System shutdown failed, press the power button for an extended period of time.\n\r");
     while (1);
 }

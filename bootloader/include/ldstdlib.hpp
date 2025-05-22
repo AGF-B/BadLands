@@ -1,7 +1,7 @@
 #pragma once
 
 #include <efi/efi_datatypes.h>
-#include <efi/efi.h>
+#include <shared/efi/efi.h>
 
 namespace Loader {
     INTN itoa(INTN x, CHAR16* buffer, INT32 radix);

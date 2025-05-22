@@ -2,7 +2,9 @@
 
 #include <efi/efi_datatypes.h>
 #include <efi/efi_misc.hpp>
-#include <efi/efi.h>
+
+#include <shared/efi/efi.h>
+#include <shared/graphics/basic.hpp>
 
 #include <loader/basic_graphics.hpp>
 
@@ -17,7 +19,7 @@ namespace {
     };
 }
 
-BasicGraphics Loader::LoadGraphics() {
+Shared::Graphics::BasicGraphics Loader::LoadGraphics() {
     EFI_GRAPHICS_OUTPUT_PROTOCOL* gop = nullptr;
 
     if (EFI::sys->BootServices->LocateProtocol(
@@ -46,7 +48,7 @@ BasicGraphics Loader::LoadGraphics() {
         }
     }
 
-    return BasicGraphics {
+    return Shared::Graphics::BasicGraphics {
         .ResX = gop->Mode->Info->HorizontalResolution,
         .ResY = gop->Mode->Info->VerticalResolution,
         .PPSL = gop->Mode->Info->PixelsPerScanLine,

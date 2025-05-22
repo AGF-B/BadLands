@@ -1,5 +1,8 @@
-mkdir -p build
+sh build_loader.sh &
+sh build_kernel.sh &
+wait
+
 cd build
-cmake -D CMAKE_C_COMPILER="x86_64-w64-mingw32-gcc" -D CMAKE_CXX_COMPILER="x86_64-w64-mingw32-g++" ..
-make -j4
+mv kernel/kernel.img kernel.img
+
 strip -R .idata -R .pdata -R .xdata BOOTX64.EFI

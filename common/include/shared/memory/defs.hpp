@@ -7,6 +7,7 @@
 namespace Shared {
     namespace Memory {
         inline constexpr uint64_t PAGE_SIZE          = 0x1000;
+        inline constexpr uint64_t FRAME_SIZE         = 0x1000;
 
         inline constexpr uint64_t PML4_ENTRIES       = 0x200;
         inline constexpr uint64_t PDPT_ENTRIES       = 0x200;
@@ -14,6 +15,11 @@ namespace Shared {
         inline constexpr uint64_t PT_ENTRIES         = 0x200;
 
         inline constexpr uint64_t ENTRY_SIZE         = 8;
+
+        inline constexpr uint64_t PML4E_COVERAGE	= 0x0000008000000000;
+        inline constexpr uint64_t PDPTE_COVERAGE	= 0x0000000040000000;
+        inline constexpr uint64_t PDE_COVERAGE		= 0x0000000000200000;
+        inline constexpr uint64_t PTE_COVERAGE		= 0x0000000000001000;
 
         inline constexpr uint64_t PML4E_PRESENT      = 0x0000000000000001;
         inline constexpr uint64_t PML4E_READWRITE    = 0x0000000000000002;
@@ -68,10 +74,10 @@ namespace Shared {
         typedef uint64_t PML4E;
 
         struct VirtualAddress {
-            uint16_t Pml4Offset;
-            uint16_t PdpteOffset;
-            uint16_t PdOffset;
-            uint16_t PtOffset;
+            uint16_t PML4_offset;
+            uint16_t PDPT_offset;
+            uint16_t PD_offset;
+            uint16_t PT_offset;
             uint16_t offset;
         };
 
@@ -88,6 +94,18 @@ namespace Shared {
             }
             else {
                 return ParseVirtualAddress(reinterpret_cast<uint64_t>(address));
+            }
+        };
+
+        template<AddressType T> void ZeroPage(T address) {
+            if constexpr (std::is_same_v<T, uint64_t>) {
+                uint64_t* pagePtr = reinterpret_cast<uint64_t*>(address);
+                for (size_t qword = 0; qword < FRAME_SIZE / sizeof(uint64_t); ++qword) {
+                    *(pagePtr + qword) = 0;
+                }
+            }
+            else {
+                ZeroPage(reinterpret_cast<uint64_t>(address));
             }
         };
     }

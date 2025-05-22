@@ -3,7 +3,7 @@
 #ifndef __EFI_STANDALONE__
 
 #include <efi/efi_datatypes.h>
-#include <efi/efi.h>
+#include <shared/efi/efi.h>
 
 namespace EFI {
     EFI_SIMPLE_FILE_SYSTEM_PROTOCOL* getDeviceSFSP(EFI_HANDLE ImageHandle, EFI_HANDLE DeviceHandle);

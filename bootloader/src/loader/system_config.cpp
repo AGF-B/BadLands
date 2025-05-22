@@ -1,7 +1,7 @@
 #include <cstdint>
 
 #include <efi/efi_misc.hpp>
-#include <efi/efi.h>
+#include <shared/efi/efi.h>
 
 #include <loader/system_config.hpp>
 
