@@ -1,8 +1,15 @@
-sh build_loader.sh &
-sh build_kernel.sh &
-wait
+#!/bin/bash
 
-cd build
-mv kernel/kernel.img kernel.img
+if [[ $1 == "--clean" ]]; then
+    rm -rf build/*
+    echo "Done"
+else
+    source build_loader.sh $@ &
+    source build_kernel.sh $@ &
+    wait
 
-strip -R .idata -R .pdata -R .xdata BOOTX64.EFI
+    cd build
+    mv kernel/kernel.img kernel.img
+
+    strip -R .idata -R .pdata -R .xdata BOOTX64.EFI
+fi
