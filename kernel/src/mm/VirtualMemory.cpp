@@ -110,7 +110,7 @@ namespace VirtualMemory {
 
         template<bool usePrimary = true>
 		static inline StatusCode MapOnDemand(const void* _address, uint64_t pages, AccessPrivilege privilege) {
-			const uint8_t* address = reinterpret_cast<const uint8_t*>(_address);
+			const uint8_t* address = static_cast<const uint8_t*>(_address);
 
 			for (size_t i = 0; i < pages; ++i) {
 				ShdMem::VirtualAddress mapping = ShdMem::ParseVirtualAddress(address);

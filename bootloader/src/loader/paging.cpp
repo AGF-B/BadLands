@@ -94,7 +94,7 @@ namespace {
                     1,
                     reinterpret_cast<EFI_PHYSICAL_ADDRESS*>(&pdpt)
                 );
-                EFI::sys->BootServices->SetMem(reinterpret_cast<VOID*>(pdpt), ShdMem::PAGE_SIZE, 0);
+                EFI::sys->BootServices->SetMem(pdpt, ShdMem::PAGE_SIZE, 0);
                 *pml4e = MakePML4E(reinterpret_cast<uint64_t>(pdpt), PI);
             }
             else {
@@ -111,7 +111,7 @@ namespace {
                     1,
                     reinterpret_cast<EFI_PHYSICAL_ADDRESS*>(&pd)
                 );
-                EFI::sys->BootServices->SetMem(reinterpret_cast<VOID*>(pd), ShdMem::PAGE_SIZE, 0);
+                EFI::sys->BootServices->SetMem(pd, ShdMem::PAGE_SIZE, 0);
                 *pdpte = MakePDPTE(reinterpret_cast<uint64_t>(pd), PI);
             }
             else {
@@ -128,7 +128,7 @@ namespace {
                     1,
                     reinterpret_cast<EFI_PHYSICAL_ADDRESS*>(&pt)
                 );
-                EFI::sys->BootServices->SetMem(reinterpret_cast<VOID*>(pt), ShdMem::PAGE_SIZE, 0);
+                EFI::sys->BootServices->SetMem(pt, ShdMem::PAGE_SIZE, 0);
                 *pde = MakePDE(reinterpret_cast<uint64_t>(pt), PI);
             }
 
@@ -176,7 +176,7 @@ namespace {
                 1,
                 reinterpret_cast<EFI_PHYSICAL_ADDRESS*>(&pdpt)
             );
-            EFI::sys->BootServices->SetMem(reinterpret_cast<VOID*>(pdpt), ShdMem::PAGE_SIZE, 0);
+            EFI::sys->BootServices->SetMem(pdpt, ShdMem::PAGE_SIZE, 0);
             *pml4e = MakePML4E(reinterpret_cast<uint64_t>(pdpt), PI);
         }
         else {
@@ -193,7 +193,7 @@ namespace {
                 1,
                 reinterpret_cast<EFI_PHYSICAL_ADDRESS*>(&pd)
             );
-            EFI::sys->BootServices->SetMem(reinterpret_cast<VOID*>(pd), ShdMem::PAGE_SIZE, 0);
+            EFI::sys->BootServices->SetMem(pd, ShdMem::PAGE_SIZE, 0);
             *pdpte = MakePDPTE(reinterpret_cast<uint64_t>(pd), PI);
         }
         else {
@@ -210,7 +210,7 @@ namespace {
                 1,
                 reinterpret_cast<EFI_PHYSICAL_ADDRESS*>(&pt)
             );
-            EFI::sys->BootServices->SetMem(reinterpret_cast<VOID*>(pt), ShdMem::PAGE_SIZE, 0);
+            EFI::sys->BootServices->SetMem(pt, ShdMem::PAGE_SIZE, 0);
             *pde = MakePDE(reinterpret_cast<uint64_t>(pt), PI);
         }
         else {
@@ -307,7 +307,7 @@ PML4E* Loader::SetupBasicPaging(const PagingInformation& PI) {
         1,
         reinterpret_cast<EFI_PHYSICAL_ADDRESS*>(&pml4)
     );
-    EFI::sys->BootServices->SetMem(reinterpret_cast<VOID*>(pml4), ShdMem::PAGE_SIZE, 0);
+    EFI::sys->BootServices->SetMem(pml4, ShdMem::PAGE_SIZE, 0);
 
     if ((uint64_t)pml4 % ShdMem::PAGE_SIZE != 0) {
         return nullptr; // ensures the PML4 is aligned on a 4 KiB boundary
@@ -361,7 +361,7 @@ void Loader::PrepareEFIRemap(PML4E* pml4, const PagingInformation& PI) {
         efi_acpi_required_pages
     );
 
-    EFI::sys->BootServices->FreePool(reinterpret_cast<VOID*>(smmap.mmap));
+    EFI::sys->BootServices->FreePool(smmap.mmap);
 }
 
 void Loader::RemapRuntimeServices(PML4E* pml4, EFI_MEMORY_DESCRIPTOR* rt_desc, const PagingInformation& PI) {
@@ -445,7 +445,7 @@ void Loader::MapLoader(PML4E* pml4, const PagingInformation& PI) {
         }
     }
 
-    EFI::sys->BootServices->FreePool(reinterpret_cast<VOID*>(smmap.mmap));
+    EFI::sys->BootServices->FreePool(smmap.mmap);
 }
 
 void Loader::RemapGOP(
@@ -519,7 +519,7 @@ void Loader::SetupLoaderInfo(
         EFI::sys->RuntimeServices->ResetSystem(EfiResetCold, EFI_BUFFER_TOO_SMALL, 0, nullptr);
     }
 
-    uint8_t* ptr = reinterpret_cast<uint8_t*>(MakeshiftMalloc(mmap, total_pages));
+    uint8_t* ptr = static_cast<uint8_t*>(MakeshiftMalloc(mmap, total_pages));
     if (ptr == nullptr) {
         // unsolable error, restart machine
         EFI::sys->RuntimeServices->ResetSystem(EfiResetCold, EFI_OUT_OF_RESOURCES, 0, nullptr);

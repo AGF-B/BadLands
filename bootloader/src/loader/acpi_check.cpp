@@ -101,7 +101,7 @@ namespace {
 void Loader::CheckACPI(const EFI_SYSTEM_CONFIGURATION& sysconfig, const EfiMemoryMap& mmap) {
     if (sysconfig.ACPI_20 != nullptr) {
 
-        ACPI_RSDP* RSDP = reinterpret_cast<ACPI_RSDP*>(sysconfig.ACPI_20);
+        ACPI_RSDP* RSDP = static_cast<ACPI_RSDP*>(sysconfig.ACPI_20);
         _acpi_named_mem_check(RSDP, RSDP->Length, mmap);
 
         ACPI_XSDT* XSDT = reinterpret_cast<ACPI_XSDT*>(RSDP->XsdtAddress);
@@ -117,8 +117,8 @@ void Loader::CheckACPI(const EFI_SYSTEM_CONFIGURATION& sysconfig, const EfiMemor
             _acpi_unnamed_mem_check(SDTH, reinterpret_cast<const char*>(SDTH->Signature), SDTH->Length, mmap);
 
             if (Loader::memcmp(
-                reinterpret_cast<const VOID*>(SDTH->Signature),
-                reinterpret_cast<const VOID*>(FADT_Sig),
+                SDTH->Signature,
+                FADT_Sig,
                 4)
             ) {
                 ACPI_FADT* FADT = reinterpret_cast<ACPI_FADT*>(SDTH);

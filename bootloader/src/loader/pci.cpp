@@ -21,7 +21,7 @@ EFI_PHYSICAL_ADDRESS Loader::LocatePCI(const EFI_SYSTEM_CONFIGURATION& sysconfig
         EFI::Terminate();
     }
 
-    ACPI_RSDP* RSDP = reinterpret_cast<ACPI_RSDP*>(sysconfig.ACPI_20);
+    ACPI_RSDP* RSDP = static_cast<ACPI_RSDP*>(sysconfig.ACPI_20);
     ACPI_RSDT* RSDT = reinterpret_cast<ACPI_RSDT*>(static_cast<uint64_t>(RSDP->RsdtAddress));
 
     size_t entries_count = (RSDT->Header.Length -
@@ -35,8 +35,8 @@ EFI_PHYSICAL_ADDRESS Loader::LocatePCI(const EFI_SYSTEM_CONFIGURATION& sysconfig
         ACPI_SDTH* SDTH = reinterpret_cast<ACPI_SDTH*>(static_cast<uint64_t>(*raw_sdth_ptr));
 
         if (Loader::memcmp(
-            reinterpret_cast<const VOID*>(SDTH->Signature),
-            reinterpret_cast<const VOID*>(MCFG_Sig),
+            SDTH->Signature,
+            MCFG_Sig,
             4
         )) {
             MCFG = (ACPI_MCFG*)SDTH;

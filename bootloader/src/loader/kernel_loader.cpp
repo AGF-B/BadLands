@@ -76,9 +76,7 @@ namespace {
                 );
                 EFI::sys->BootServices->CopyMem(
                     reinterpret_cast<VOID*>(segment_memory),
-                    reinterpret_cast<VOID*>(
-                        const_cast<uint8_t*>(kernel_data) + elf_phdr_table[i].FileOffset
-                    ),
+                    const_cast<uint8_t*>(kernel_data) + elf_phdr_table[i].FileOffset,
                     elf_phdr_table[i].SegmentFileSize
                 );
 
