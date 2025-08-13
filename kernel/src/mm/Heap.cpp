@@ -5,166 +5,508 @@
 
 #include <mm/PhysicalMemory.hpp>
 #include <mm/VirtualMemory.hpp>
-
-#include <screen/Log.hpp>
+#include <mm/Heap.hpp>
+#include <mm/Utils.hpp>
 
 namespace ShdMem = Shared::Memory;
 
-struct malloc_block_t {
-	uint64_t height;
-	malloc_block_t* left;
-	malloc_block_t* right;
-	uint64_t regionSize;
-};
-
 namespace {
-    static constexpr size_t HEAP_ALIGN_V = 16;
+	static constexpr size_t ARENA_ALIGNMENT = 8;
 
-	static malloc_block_t* firstBlock = nullptr;
-}
-
-namespace Heap {
-	void* Allocate(size_t size) {
-		static_assert(sizeof(malloc_block_t) % HEAP_ALIGN_V == 0);
-
-		// align on a natural boundary
-		if (size % HEAP_ALIGN_V != 0) {
-			size += HEAP_ALIGN_V - (size % HEAP_ALIGN_V);
-		}
-
-		if (firstBlock == nullptr) {
-			void* pages = nullptr;
-
-			size_t allocatedPages = 16;
-
-			if (size + sizeof(malloc_block_t) >= allocatedPages * ShdMem::FRAME_SIZE) {
-				allocatedPages = (size + sizeof(malloc_block_t) + ShdMem::FRAME_SIZE - 1) / ShdMem::FRAME_SIZE;
-			}
-			pages = VirtualMemory::AllocateKernelHeap(allocatedPages);
-
-			if (pages == nullptr) {
-				return nullptr;
-			}
-
-			malloc_block_t* allocated = static_cast<malloc_block_t*>(pages);
-			allocated->prev = allocated;
-			allocated->size = size + sizeof(malloc_block_t);
-
-			if (allocatedPages * ShdMem::FRAME_SIZE - size - sizeof(malloc_block_t) >= sizeof(malloc_block_t) + HEAP_ALIGN_V) {
-				firstBlock = reinterpret_cast<malloc_block_t*>(static_cast<uint8_t*>(pages) + size + sizeof(malloc_block_t));
-				firstBlock->prev = nullptr;
-				firstBlock->next = nullptr;
-				firstBlock->size = allocatedPages * ShdMem::FRAME_SIZE - size - sizeof(malloc_block_t);
-				allocated->next = firstBlock;
-			}
-			else {
-				allocated->next = nullptr;
-			}
-
-			return static_cast<uint8_t*>(pages) + sizeof(malloc_block_t);
-		}
-
-		malloc_block_t* currentBlock = firstBlock;
-		while (currentBlock != nullptr) {
-			if (currentBlock->size < size + sizeof(malloc_block_t)) {
-				currentBlock = currentBlock->next;
-				continue;
-			}
-
-			malloc_block_t* allocated = currentBlock;
-			malloc_block_t* prev = allocated->prev;
-			allocated->prev = allocated;
-			const size_t remainingSize = allocated->size - (size + sizeof(malloc_block_t));
-			allocated->size -= remainingSize;
-
-			if (remainingSize >= sizeof(malloc_block_t) + HEAP_ALIGN_V) {
-				currentBlock = reinterpret_cast<malloc_block_t*>(reinterpret_cast<uint8_t*>(allocated) + allocated->size);
-				currentBlock->prev = prev;
-				currentBlock->next = allocated->next;
-				currentBlock->size = remainingSize;
-				allocated->next = currentBlock;
-				if (currentBlock->next != nullptr) {
-					currentBlock->next->prev = currentBlock;
-				}
-				if (currentBlock->prev != nullptr) {
-					currentBlock->prev->next = currentBlock;
-				}
-				if (firstBlock == allocated) {
-					firstBlock = currentBlock;
-				}
-			}
-			else {
-				if (allocated->next != nullptr) {
-					allocated->next->prev = allocated->prev;
-				}
-				if (allocated->prev != nullptr) {
-					allocated->prev->next = allocated->next;
-				}
-				allocated->next = nullptr;
-			}
-
-			return allocated + 1;
-		}
-
-		return nullptr;
+	template<class T>
+	static constexpr T HostedMax(const T& x, const T& y) {
+		return x > y ? x : y;
 	}
 
-	void Free(void* ptr) {
-		if (ptr == nullptr) {
-			return;
+	struct AllocatedNode {
+		uint64_t size;
+	};
+
+	class AVLHeap {
+	public:
+		AVLHeap();
+		AVLHeap(uint8_t* arena, size_t size);
+
+		void* Allocate(uint64_t size);
+		void Free(void* ptr);
+
+		struct Node;
+
+	private:
+		Node* arenaRoot = nullptr;
+	};
+
+	struct AVLHeap::Node{
+	private:
+		static uint64_t GetHeight(const Node* n) {
+			return n == nullptr ? 0 : n->height;
 		}
 
-		malloc_block_t* blockPtr = reinterpret_cast<malloc_block_t*>(static_cast<uint8_t*>(ptr) - sizeof(malloc_block_t));
-		malloc_block_t* blockEndPtr = reinterpret_cast<malloc_block_t*>(reinterpret_cast<uint8_t*>(blockPtr) + blockPtr->size);
+	public:
+		uint64_t size;
+		Node* left;
+		Node* right;
+		Node* parent;
+		uint64_t height;
 
-		if (blockPtr->next != nullptr) {
-			if (blockEndPtr == blockPtr->next) {
-				blockPtr->size += blockPtr->next->size;
-				blockPtr->prev = blockPtr->next->prev;
-				blockPtr->next = blockPtr->next->next;
+		void UpdateHeight() {
+			height = HostedMax(GetHeight(left), GetHeight(right)) + 1;
+		}
 
-				if (blockPtr->next != nullptr) {
-					blockPtr->next->prev = blockPtr;
+		int64_t GetBalanceFactor() const {
+			return GetHeight(left) - GetHeight(right);
+		}
+
+		static Node* RotateLeft(Node* root) {
+			Node* newRoot;
+
+			if (root == nullptr || (newRoot = root->right) == nullptr) {
+				return root;
+			}
+
+			root->right = newRoot->left;
+			newRoot->left = root;
+
+			if (root->right != nullptr) {
+				root->right->parent = root;
+			}
+
+			Node* parent = root->parent;
+			root->parent = newRoot;
+			newRoot->parent = parent;
+
+			if (parent != nullptr) {
+				if (root < parent) {
+					parent->left = newRoot;
 				}
-				if (blockPtr->prev != nullptr) {
-					blockPtr->prev->next = blockPtr;
+				else {
+					parent->right = newRoot;
 				}
+			}
+
+			root->UpdateHeight();
+			newRoot->UpdateHeight();
+
+			return newRoot;
+		}
+
+		static Node* RotateRight(Node* root) {
+			Node* newRoot;
+
+			if (root == nullptr || (newRoot = root->left) == nullptr) {
+				return root;
+			}
+
+			root->left = newRoot->right;
+			newRoot->right = root;
+
+			if (root->left != nullptr) {
+				root->left->parent = root;
+			}
+
+			Node* parent = root->parent;
+			root->parent = newRoot;
+			newRoot->parent = parent;
+
+			if (parent != nullptr) {
+				if (root < parent) {
+					parent->left = newRoot;
+				}
+				else {
+					parent->right = newRoot;
+				}
+			}
+
+			root->UpdateHeight();
+			newRoot->UpdateHeight();
+
+			return newRoot;
+		}
+
+		static Node* RotateRightLeft(Node* root) {
+			Node* newSubRoot = RotateRight(root->right);
+			root->right = newSubRoot;
+			return RotateLeft(root);
+		}
+
+		static Node* RotateLeftRight(Node* root) {
+			Node* newSubRoot = RotateLeft(root->left);
+			root->left = newSubRoot;
+			return RotateRight(root);
+		}
+	};
+
+	using Node = AVLHeap::Node;
+	using Tree = Node;
+
+	static Tree* Rebalance(Tree* root, Tree* ptr) {
+		root->UpdateHeight();
+
+		const int64_t balanceFactor = root->GetBalanceFactor();
+
+		if (balanceFactor < -1 || balanceFactor > 1) {
+			if (ptr > root && ptr > root->right) {
+				root = Node::RotateLeft(root);
+			}
+			else if (ptr < root && ptr < root->left) {
+				root = Node::RotateRight(root);
+			}
+			else if (ptr > root && ptr < root->right) {
+				root = Node::RotateRightLeft(root);
+			}
+			else if (ptr < root && ptr > root->left) {
+				root = Node::RotateLeftRight(root);
+			}
+		}
+
+		return root;
+	}
+
+	static Tree* Insert(Tree* root, AllocatedNode* _n) {
+		Node* n = (Node*)_n;
+
+		if (root == nullptr) {
+			*n = Node{
+				.size = _n->size,
+				.left = nullptr,
+				.right = nullptr,
+				.parent = nullptr,
+				.height = 1
+			};
+			return n;
+		}
+
+		Node* prev = root;
+		Node* curr = root;
+
+		while (curr != nullptr) {
+			prev = curr;
+
+			if (n < curr) {
+				curr = curr->left;
+			}
+			else if (n > curr) {
+				curr = curr->right;
 			}
 			else {
-				blockPtr->prev = blockPtr->next->prev;
-				blockPtr->next->prev = blockPtr;
-				blockPtr->prev->next = blockPtr;
+				return root;
 			}
+		}
 
-			while (blockPtr->prev != nullptr
-				&& blockEndPtr == reinterpret_cast<malloc_block_t*>(
-					reinterpret_cast<uint8_t*>(blockPtr->prev + blockPtr->prev->size)
-			)) {
-				blockPtr->prev->size += blockPtr->size;
-				blockPtr->prev->next = blockPtr->next;
-				blockPtr->next->prev = blockPtr->prev;
-				blockPtr = blockPtr->prev;
+		*n = {
+			.size = _n->size,
+			.left = nullptr,
+			.right = nullptr,
+			.parent = prev,
+			.height = 1
+		};
+
+		if (n < prev) {
+			prev->left = n;
+		}
+		else {
+			prev->right = n;
+		}
+
+		for (; prev != nullptr; curr = prev, prev = prev->parent) {
+			prev = Rebalance(prev, n);
+		}
+
+		return curr;
+	}
+
+	static Tree* Delete(Tree* root, Node* node) {
+		if (root == nullptr || node == nullptr) {
+			return root;
+		}
+
+		Node* prev = node->parent;
+
+		Node* left = node->left;
+		Node* right = node->right;
+
+		if (left == nullptr && right == nullptr) {
+			if (prev == nullptr) {
+				root = nullptr;
 			}
+			else if (node > prev) {
+				prev->right = nullptr;
+			}
+			else {
+				prev->left = nullptr;
+			}
+		}
+		else if (right == nullptr) {
+			left->parent = prev;
 
-			if (blockPtr->prev == nullptr) {
-				firstBlock = blockPtr;
+			if (prev == nullptr) {
+				root = left;
+			}
+			else if (node > prev) {
+				prev->right = left;
+			}
+			else {
+				prev->left = left;
+			}
+		}
+		else if (left == nullptr) {
+			right->parent = prev;
+
+			if (prev == nullptr) {
+				root = right;
+			}
+			else if (node > prev) {
+				prev->right = right;
+			}
+			else {
+				prev->left = right;
 			}
 		}
 		else {
-			if (firstBlock == nullptr) {
-				firstBlock = blockPtr;
-				blockPtr->next = nullptr;
-				blockPtr->prev = nullptr;
+			Node* ptr = right;
+			Node* successor = ptr;
+
+			while (ptr != nullptr) {
+				successor = ptr;
+				ptr = ptr->left;
+			}
+
+			Node* new_prev;
+
+			if (successor->parent != node) {
+				successor->parent->left = successor->right;
+
+				if (successor->right != nullptr) {
+					successor->right->parent = successor->parent;
+				}
+
+				new_prev = successor->parent;
+
+				successor->right = right;
+				right->parent = successor;
 			}
 			else {
-				malloc_block_t* ptr = firstBlock;
-				while (ptr->next != nullptr) {
-					ptr = ptr->next;
+				new_prev = successor;
+			}
+
+			successor->left = left;
+			left->parent = successor;
+			successor->parent = prev;
+
+			successor->UpdateHeight();
+
+			if (prev == nullptr) {
+				root = successor;
+			}
+			else {
+				if (successor < prev) {
+					prev->left = successor;
 				}
-				ptr->next = blockPtr;
-				blockPtr->prev = ptr;
-				blockPtr->next = nullptr;
+				else {
+					prev->right = successor;
+				}
+			}
+
+			prev = new_prev;
+		}
+
+		if (prev == nullptr) {
+			if (root == nullptr) {
+				return nullptr;
+			}
+			else {
+				return Rebalance(root, node);
 			}
 		}
+		else {
+			Node* subroot = nullptr;
+
+			for (; prev != nullptr; subroot = prev, prev = prev->parent) {
+				prev->UpdateHeight();
+
+				const int64_t balanceFactor = prev->GetBalanceFactor();
+
+				if (balanceFactor > 1) {
+					if (prev->left->GetBalanceFactor() >= 0) {
+						prev = Node::RotateRight(prev);
+					}
+					else {
+						prev = Node::RotateLeftRight(prev);
+					}
+				}
+				else if (balanceFactor < -1) {
+					if (prev->right->GetBalanceFactor() > 0) {
+						prev = Node::RotateRightLeft(prev);
+					}
+					else {
+						prev = Node::RotateLeft(prev);
+					}
+				}
+			}
+
+			return subroot;
+		}
 	}
+
+	static Node* BestFind(Tree* root, uint64_t size) {
+		if (root == nullptr) {
+			return nullptr;
+		}
+
+		if (root->size == size) {
+			return root;
+		}
+
+		Node* left = BestFind(root->left, size);
+
+		if (left != nullptr && left->size == size) {
+			return left;
+		}
+			
+		Node* right = BestFind(root->right, size);
+
+		Node* nodes[3] = { root, left, right };
+		uint64_t sizes[3] = { root->size, left != nullptr ? left->size : 0, right != nullptr ? right->size : 0 };
+
+		for (size_t i = 0; i < 3; ++i) {
+			if (sizes[i] < size) {
+				sizes[i] = 0;
+				nodes[i] = nullptr;
+			}
+		}
+
+		size_t best_fit = 0;
+
+		for (size_t i = 0; i < 3; ++i) {
+			if (sizes[i] > 0 && sizes[i] < sizes[best_fit] && sizes[i] >= size) {
+				best_fit = i;
+			}
+		}
+
+		return nodes[best_fit];
+	}
+
+	static AllocatedNode* ExtendArena(size_t size) {
+		const size_t effective_size = 2 * size;
+		const size_t allocated_pages = (effective_size + ShdMem::PAGE_SIZE - 1) / ShdMem::PAGE_SIZE;
+		const size_t allocated_size = allocated_pages * ShdMem::PAGE_SIZE;
+
+		void* ptr = VirtualMemory::AllocateKernelHeap(allocated_pages);
+
+		if (ptr == nullptr) {
+			return nullptr;
+		}
+
+		Utils::memset(ptr, 0, allocated_size);
+
+		AllocatedNode* node = (AllocatedNode*)ptr;
+		node->size = allocated_size;
+		return node;
+	}
+
+	static void* Allocate(Tree*& root, uint64_t size) {
+		size += sizeof(AllocatedNode);
+
+		if (size < sizeof(Node)) {
+			size = sizeof(Node);
+		}
+
+		uint64_t misalignment = size % ARENA_ALIGNMENT;
+
+		if (misalignment != 0) {
+			size += ARENA_ALIGNMENT - misalignment;
+		}
+
+		Node* node = BestFind(root, size);
+
+		if (node == nullptr) {
+			AllocatedNode* node = ExtendArena(size);
+
+			if (node == nullptr) {
+				return nullptr;
+			}
+
+			uint8_t* pointer = (uint8_t*)node + node->size - size;
+			node->size -= size;
+			((AllocatedNode*)pointer)->size = size;
+
+			root = Insert(root, node);
+			return pointer + sizeof(AllocatedNode);
+		}
+
+		if (node->size > size && node->size - size >= sizeof(Node)) {
+			uint8_t* pointer = (uint8_t*)node + node->size - size;
+			((AllocatedNode*)pointer)->size = size;
+
+			node->size -= size;
+
+			return pointer + sizeof(AllocatedNode);
+		}
+		else {
+			root = Delete(root, node);
+
+			((AllocatedNode*)node)->size = node->size;
+			return ((uint8_t*)node) + sizeof(AllocatedNode);
+		}
+	}
+
+	static void Free(Tree*& root, void* pointer) {
+		AllocatedNode* allocatedNode = (AllocatedNode*)((uint8_t*)pointer - sizeof(AllocatedNode));
+
+		root = Insert(root, allocatedNode);
+	}
+
+	AVLHeap::AVLHeap() {
+		arenaRoot = nullptr;
+	}
+
+	AVLHeap::AVLHeap(uint8_t* arena, size_t size) {
+		arenaRoot = (Node*)arena;
+		*arenaRoot = Node{
+			.size = size,
+			.left = nullptr,
+			.right = nullptr,
+			.parent = nullptr,
+			.height = 1
+		};
+	}
+
+	void* AVLHeap::Allocate(uint64_t size) {
+		return ::Allocate(arenaRoot, size);
+	}
+
+	void AVLHeap::Free(void* ptr) {
+		return ::Free(arenaRoot, ptr);
+	}
+
+	static bool CreateAVLHeap(AVLHeap& heap) {
+		const size_t allocated_pages = 16;
+		const size_t allocated_memory = allocated_pages * ShdMem::PAGE_SIZE;
+
+		void* pages = VirtualMemory::AllocateKernelHeap(allocated_pages);
+
+		if (pages == nullptr) {
+			return false;
+		}
+
+		Utils::memset(pages, 0, allocated_memory);
+
+		heap = AVLHeap((uint8_t*)pages, allocated_memory);
+
+		return true;
+	}
+
+	AVLHeap heap;
+}
+
+bool Heap::Create() {
+	return CreateAVLHeap(heap);
+}
+
+void* Heap::Allocate(size_t size) {
+	return heap.Allocate(size);
+}
+
+void Heap::Free(void* ptr) {
+	return heap.Free(ptr);
 }
