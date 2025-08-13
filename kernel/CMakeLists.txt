@@ -12,12 +12,16 @@ add_library(KERNEL_IMG_ASM STATIC
 )
 
 add_executable(KERNEL_IMG
+    "src/fs/IFNode.cpp"
+    "src/fs/NPFS.cpp"
+    "src/fs/VFS.cpp"
     "src/interrupts/core/PageFault.cpp"
     "src/interrupts/idt.cpp"
     "src/interrupts/CoreDump.cpp"
     "src/interrupts/Panic.cpp"
     "src/mm/Heap.cpp"
     "src/mm/PhysicalMemory.cpp"
+    "src/mm/Utils.cpp"
     "src/mm/VirtualMemory.cpp"
     "src/screen/Framebuffer.cpp"
     "src/screen/Log.cpp"
@@ -44,15 +48,18 @@ target_compile_options(KERNEL_IMG PRIVATE
     -static
     -fno-exceptions
     -fno-rtti
+    -flto
 )
 
 target_link_options(KERNEL_IMG PRIVATE
     -Wl,-e,KernelEntry
     -Wl,-T,../../kernel/linker.ld
     -Wl,--build-id=none
+    -s
     -z noexecstack
     -nolibc
     -nostdlib
+    -flto
 )
 
 target_compile_features(KERNEL_IMG PRIVATE cxx_std_23)
