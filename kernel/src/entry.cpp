@@ -3,12 +3,17 @@
 #include <shared/efi/efi.h>
 #include <shared/memory/layout.hpp>
 
+#include <fs/VFS.hpp>
+
+#include <GRM/ResourceManager.hpp>
+
 #include <interrupts/idt.hpp>
 #include <interrupts/Panic.hpp>
 
 #include <mm/gdt.hpp>
 #include <mm/Heap.hpp>
 #include <mm/PhysicalMemory.hpp>
+#include <mm/Utils.hpp>
 #include <mm/VirtualMemory.hpp>
 
 #include <screen/Log.hpp>
@@ -50,12 +55,32 @@ namespace {
     }
 
     static inline void SetupVirtualMemory() {
-        auto status = VirtualMemory::Setup();
-        if (status != VirtualMemory::StatusCode::SUCCESS) {
+        if (VirtualMemory::Setup() != VirtualMemory::StatusCode::SUCCESS) {
             Panic::PanicShutdown(rtServices, "VMM INITIALIZATION FAILED\n\r");
         }
     }
+
+    static inline void SetupHeap() {
+        if (!Heap::Create()) {
+            Panic::PanicShutdown(rtServices, "KERNEL HEAP CREATION FAILED\n\r");
+        }
+    }
+
+    static inline VFS* SetupVFS() {
+        VFS* vfs = static_cast<VFS*>(Heap::Allocate(sizeof(VFS)));
+
+        if (vfs == nullptr) {
+            Panic::PanicShutdown(rtServices, "VFS MEMORY ALLOCATION FAILED\n\r");
+        }
+        else if (!VFS::Construct(vfs)) {
+            Panic::PanicShutdown(rtServices, "VFS INITIALIZATION FAILED\n\r");
+        }
+
+        return vfs;
+    }
 }
+
+#include <new>
 
 LEGACY_EXPORT void KernelEntry() {
     __asm__ volatile("cli");
@@ -74,13 +99,11 @@ LEGACY_EXPORT void KernelEntry() {
     SetupVirtualMemory();
     Log::puts("VMM Initialized\n\r");
 
-    auto ptr    = Heap::Allocate(1);
-    auto ptr2   = Heap::Allocate(17);
+    SetupHeap();
+    Log::puts("KERNEL HEAP Initialized\n\r");
 
-    __asm__ volatile("mov %0, %%r15" :: "r"(ptr));
-    __asm__ volatile("mov %0, %%r14" :: "r"(ptr2));
-
-    Heap::Free(ptr);
+    VFS* vfs = SetupVFS();
+    Log::puts("VFS Initialized\n\r");
 
     while (1) {
         __asm__ volatile("hlt");
