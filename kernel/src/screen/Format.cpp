@@ -422,7 +422,8 @@ namespace {
                             continue;
                         }
 
-                        char number_buffer[precision];
+                        char number_buffer[precision + 1];
+                        number_buffer[precision] = 0;
                         intmax_t len = itoa(number, number_buffer, 10);
 
                         precision_fill(&len, precision, number_buffer);
@@ -459,7 +460,8 @@ namespace {
                             continue;
                         }
 
-                        char number_buffer[precision];
+                        char number_buffer[precision + 1];
+                        number_buffer[precision] = 0;
                         intmax_t len = utoa(number, number_buffer, 8);
 
                         precision_fill(&len, precision, number_buffer);
@@ -493,7 +495,8 @@ namespace {
                             continue;
                         }
 
-                        char number_buffer[precision];
+                        char number_buffer[precision + 1];
+                        number_buffer[precision] = 0;
                         intmax_t len = utoa(number, number_buffer, 16);
 
                         if (c == 'X') {
@@ -535,7 +538,8 @@ namespace {
                             continue;
                         }
 
-                        char number_buffer[precision];
+                        char number_buffer[precision + 1];
+                        number_buffer[precision] = 0;
                         intmax_t len = utoa(number, number_buffer, 10);
 
                         precision_fill(&len, precision, number_buffer);
