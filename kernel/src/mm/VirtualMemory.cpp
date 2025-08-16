@@ -630,7 +630,7 @@ namespace VirtualMemory {
 					| ShdMem::PTE_PRESENT;
 
 				__asm__ volatile("invlpg (%0)" :: "r"(address));
-				return reinterpret_cast<void*>(address);
+				return reinterpret_cast<void*>(address + (reinterpret_cast<uint64_t>(pageAddress) % ShdMem::PAGE_SIZE));
 			}
 		}
 
