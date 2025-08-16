@@ -23,6 +23,7 @@ add_executable(KERNEL_IMG
     "src/mm/PhysicalMemory.cpp"
     "src/mm/Utils.cpp"
     "src/mm/VirtualMemory.cpp"
+    "src/screen/Format.cpp"
     "src/screen/Framebuffer.cpp"
     "src/screen/Log.cpp"
     "src/entry.cpp"

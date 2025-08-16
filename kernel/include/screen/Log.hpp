@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdarg>
+#include <cstddef>
 #include <cstdint>
 
 namespace Log {
@@ -7,4 +9,5 @@ namespace Log {
 	void putcAt(char c, uint32_t x, uint32_t y);
 	void putc(char c);
 	void puts(const char* s);
+	void printf(const char* format, ...);
 }
