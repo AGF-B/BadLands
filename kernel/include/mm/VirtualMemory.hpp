@@ -125,4 +125,7 @@ namespace VirtualMemory {
 	StatusCode FreeDMA(void* ptr, uint64_t pages);
 	StatusCode FreeKernelHeap(void* ptr, uint64_t pages);
 	StatusCode FreeUserPages(void* ptr, uint64_t pages);
+
+	void* MapGeneralPage(void* pageAddress);
+	StatusCode UnmapGeneralPage(void* vpage);
 }

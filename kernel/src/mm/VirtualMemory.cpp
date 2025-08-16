@@ -579,4 +579,86 @@ namespace VirtualMemory {
 	StatusCode FreeUserPages(void* ptr, uint64_t pages) {
 		return FreeCore<AccessPrivilege::LOW>(ptr, pages);
 	}
+
+	void* MapGeneralPage(void* pageAddress) {
+		constexpr uint64_t GP_PAGES = VirtualMemoryLayout::GeneralMapping.limit / ShdMem::PAGE_SIZE;
+
+		uint64_t address = VirtualMemoryLayout::GeneralMapping.start;
+
+		for (size_t i = 0; i < GP_PAGES; ++i, address += ShdMem::PAGE_SIZE) {
+			auto mapping = ShdMem::ParseVirtualAddress(address);
+
+			PDPTE* pdpte = GetPDPTEAddress(mapping.PML4_offset, mapping.PDPT_offset);
+
+			if ((*pdpte & ShdMem::PDPTE_PRESENT) == 0) {
+				void* page = PhysicalMemory::Allocate();
+
+				if (page == nullptr) {
+					return nullptr;
+				}
+
+				*pdpte = (PhysicalMemory::FilterAddress(page) & ShdMem::PDPTE_ADDRESS)
+					| ShdMem::PDPTE_READWRITE
+					| ShdMem::PDPTE_PRESENT;
+
+				PDE* pd = GetPDAddress(mapping.PML4_offset, mapping.PDPT_offset);
+				ShdMem::ZeroPage(pd);
+			}
+
+			PDE* pde = GetPDEAddress(mapping.PML4_offset, mapping.PDPT_offset, mapping.PD_offset);
+
+			if ((*pde & ShdMem::PDE_PRESENT) == 0) {
+				void* page = PhysicalMemory::Allocate();
+				
+				if (page == nullptr) {
+					return nullptr;
+				}
+
+				*pde = (PhysicalMemory::FilterAddress(page) & ShdMem::PDE_ADDRESS)
+					| ShdMem::PDE_READWRITE
+					| ShdMem::PDE_PRESENT;
+
+				PTE* pt = GetPTAddress(mapping.PML4_offset, mapping.PDPT_offset, mapping.PD_offset);
+				ShdMem::ZeroPage(pt);
+			}
+
+			PTE* pte = GetPTEAddress(mapping.PML4_offset, mapping.PDPT_offset, mapping.PD_offset, mapping.PT_offset);
+
+			if ((*pte & ShdMem::PTE_PRESENT) == 0) {
+				*pte = (PhysicalMemory::FilterAddress(pageAddress) & ShdMem::PTE_ADDRESS)
+					| ShdMem::PTE_READWRITE
+					| ShdMem::PTE_PRESENT;
+
+				__asm__ volatile("invlpg (%0)" :: "r"(address));
+				return reinterpret_cast<void*>(address);
+			}
+		}
+
+		return nullptr;
+	}
+
+	StatusCode UnmapGeneralPage(void* vpage) {
+		auto mapping = ShdMem::ParseVirtualAddress(vpage);
+
+		PML4E* pml4e = GetPML4EAddress(mapping.PML4_offset);
+		if ((*pml4e & ShdMem::PML4E_PRESENT) == 0) {
+			return StatusCode::INVALID_PARAMETER;
+		}
+
+		PDPTE* pdpte = GetPDPTEAddress(mapping.PML4_offset, mapping.PDPT_offset);
+		if ((*pdpte & ShdMem::PDPTE_PRESENT) == 0) {
+			return StatusCode::INVALID_PARAMETER;
+		}
+
+		PDE* pde = GetPDEAddress(mapping.PML4_offset, mapping.PDPT_offset, mapping.PD_offset);
+		if ((*pde & ShdMem::PDE_PRESENT) == 0) {
+			return StatusCode::INVALID_PARAMETER;
+		}
+
+		PTE* pte = GetPTEAddress(mapping.PML4_offset, mapping.PDPT_offset, mapping.PD_offset, mapping.PT_offset);
+		*pte = 0;
+
+		__asm__ volatile("invlpg (%0)" :: "r"(vpage));
+		return StatusCode::SUCCESS;
+	}
 }
