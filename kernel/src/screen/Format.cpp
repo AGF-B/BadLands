@@ -330,6 +330,7 @@ namespace {
 
                         if (left_justify) {
                             Log::putc(buffer);
+                            
                             for (intmax_t i = 0; i < minimum_field_size - 1; ++i) {
                                 Log::putc(' ');
                             }
@@ -362,9 +363,9 @@ namespace {
                                 else {
                                     const char* tmp = s;
                                     while (*tmp++ != '\0');
-                                    length = tmp - s - 1;
+                                    length = static_cast<intmax_t>(tmp - s) - 1;
 
-                                    for (intmax_t i = 0; minimum_field_size - length; ++i) {
+                                    for (intmax_t i = 0; i < minimum_field_size - length; ++i) {
                                         Log::putc(' ');
                                     }
                                     Log::puts(s);
