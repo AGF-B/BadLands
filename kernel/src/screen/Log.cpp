@@ -51,6 +51,7 @@ namespace {
 	}
 
 	static inline void scrollLine(uint32_t row) {
+		/// TODO: Use back buffer to avoid reading from video memory, which is insanely slow
 		for (size_t x = 0; x < screenInfo.width; ++x) {
 			*getPixelAddress(x, row - GLYPH_HEIGHT) = *getPixelAddress(x, row);
 		}
