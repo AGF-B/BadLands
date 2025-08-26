@@ -117,3 +117,7 @@ void Interrupts::kernel_idt_setup() {
 
 	__asm__ volatile("lidt (%0)" :: "memory"(IDTP));
 }
+
+void Interrupts::RegisterIRQ(unsigned int interruptVector, void (*handler)(void), unsigned int isTrap) {
+	registerCoreInterrupt(interruptVector, handler, INTDPL::DPL0, isTrap ? INTTYPE::TRAP : INTTYPE::EXCEPTION);
+}
