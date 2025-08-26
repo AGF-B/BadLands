@@ -126,6 +126,6 @@ namespace VirtualMemory {
 	StatusCode FreeKernelHeap(void* ptr, uint64_t pages);
 	StatusCode FreeUserPages(void* ptr, uint64_t pages);
 
-	void* MapGeneralPage(void* pageAddress);
-	StatusCode UnmapGeneralPage(void* vpage);
+	void* MapGeneralPages(void* pageAddress, size_t pages, uint64_t flags = 0);
+	StatusCode UnmapGeneralPages(void* vpage, size_t pages);
 }

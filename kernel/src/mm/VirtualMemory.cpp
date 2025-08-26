@@ -580,10 +580,17 @@ namespace VirtualMemory {
 		return FreeCore<AccessPrivilege::LOW>(ptr, pages);
 	}
 
-	void* MapGeneralPage(void* pageAddress) {
+	void* MapGeneralPages(void* pageAddress, size_t pages, uint64_t flags) {
 		constexpr uint64_t GP_PAGES = VirtualMemoryLayout::GeneralMapping.limit / ShdMem::PAGE_SIZE;
 
+		if (pages == 0) {
+			return nullptr;
+		}
+
 		uint64_t address = VirtualMemoryLayout::GeneralMapping.start;
+
+		size_t found = 0;
+		uint64_t start = 0;
 
 		for (size_t i = 0; i < GP_PAGES; ++i, address += ShdMem::PAGE_SIZE) {
 			auto mapping = ShdMem::ParseVirtualAddress(address);
@@ -625,40 +632,69 @@ namespace VirtualMemory {
 			PTE* pte = GetPTEAddress(mapping.PML4_offset, mapping.PDPT_offset, mapping.PD_offset, mapping.PT_offset);
 
 			if ((*pte & ShdMem::PTE_PRESENT) == 0) {
-				*pte = (PhysicalMemory::FilterAddress(pageAddress) & ShdMem::PTE_ADDRESS)
-					| ShdMem::PTE_READWRITE
-					| ShdMem::PTE_PRESENT;
+				if (found == 0) {
+					start = address;
+				}
 
-				__asm__ volatile("invlpg (%0)" :: "r"(address));
-				return reinterpret_cast<void*>(address + (reinterpret_cast<uint64_t>(pageAddress) % ShdMem::PAGE_SIZE));
+				if (++found == pages) {
+					address = start;
+
+					uint64_t physical_address = reinterpret_cast<uint64_t>(pageAddress);
+
+					for (size_t j = 0; j < pages; ++j, address += ShdMem::PAGE_SIZE, physical_address += ShdMem::PAGE_SIZE) {
+						mapping = ShdMem::ParseVirtualAddress(address);
+						pte = GetPTEAddress(mapping.PML4_offset, mapping.PDPT_offset, mapping.PD_offset, mapping.PT_offset);
+
+						*pte = (PhysicalMemory::FilterAddress(physical_address) & ShdMem::PTE_ADDRESS)
+							| flags
+							| ShdMem::PTE_PRESENT;
+
+						__asm__ volatile("invlpg (%0)" :: "r"(address));
+					}
+
+					return reinterpret_cast<void*>(start + (reinterpret_cast<uint64_t>(pageAddress) % ShdMem::PAGE_SIZE));
+				}
+			}
+			else {
+				found = 0;
+				start = 0;
 			}
 		}
 
 		return nullptr;
 	}
 
-	StatusCode UnmapGeneralPage(void* vpage) {
-		auto mapping = ShdMem::ParseVirtualAddress(vpage);
-
-		PML4E* pml4e = GetPML4EAddress(mapping.PML4_offset);
-		if ((*pml4e & ShdMem::PML4E_PRESENT) == 0) {
-			return StatusCode::INVALID_PARAMETER;
+	StatusCode UnmapGeneralPages(void* vpage, size_t pages) {
+		if (pages == 0) {
+			return StatusCode::SUCCESS;
 		}
 
-		PDPTE* pdpte = GetPDPTEAddress(mapping.PML4_offset, mapping.PDPT_offset);
-		if ((*pdpte & ShdMem::PDPTE_PRESENT) == 0) {
-			return StatusCode::INVALID_PARAMETER;
+		uint64_t address = reinterpret_cast<uint64_t>(vpage);
+
+		for (size_t i = 0; i < pages; ++i, address += ShdMem::PAGE_SIZE) {
+			auto mapping = ShdMem::ParseVirtualAddress(address);
+
+			PML4E* pml4e = GetPML4EAddress(mapping.PML4_offset);
+			if ((*pml4e & ShdMem::PML4E_PRESENT) == 0) {
+				return StatusCode::INVALID_PARAMETER;
+			}
+
+			PDPTE* pdpte = GetPDPTEAddress(mapping.PML4_offset, mapping.PDPT_offset);
+			if ((*pdpte & ShdMem::PDPTE_PRESENT) == 0) {
+				return StatusCode::INVALID_PARAMETER;
+			}
+
+			PDE* pde = GetPDEAddress(mapping.PML4_offset, mapping.PDPT_offset, mapping.PD_offset);
+			if ((*pde & ShdMem::PDE_PRESENT) == 0) {
+				return StatusCode::INVALID_PARAMETER;
+			}
+
+			PTE* pte = GetPTEAddress(mapping.PML4_offset, mapping.PDPT_offset, mapping.PD_offset, mapping.PT_offset);
+			*pte = 0;
+
+			__asm__ volatile("invlpg (%0)" :: "r"(address));
 		}
 
-		PDE* pde = GetPDEAddress(mapping.PML4_offset, mapping.PDPT_offset, mapping.PD_offset);
-		if ((*pde & ShdMem::PDE_PRESENT) == 0) {
-			return StatusCode::INVALID_PARAMETER;
-		}
-
-		PTE* pte = GetPTEAddress(mapping.PML4_offset, mapping.PDPT_offset, mapping.PD_offset, mapping.PT_offset);
-		*pte = 0;
-
-		__asm__ volatile("invlpg (%0)" :: "r"(vpage));
 		return StatusCode::SUCCESS;
 	}
 }
