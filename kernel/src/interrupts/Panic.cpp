@@ -5,6 +5,7 @@
 
 #include <interrupts/CoreDump.hpp>
 #include <interrupts/Panic.hpp>
+#include <interrupts/RuntimeSvc.hpp>
 
 #include <screen/Log.hpp>
 
@@ -69,7 +70,9 @@ namespace Panic {
 	}
 
 
-    [[noreturn]] void PanicShutdown(const EFI_RUNTIME_SERVICES* rtServices, const char* msg) {
+    [[noreturn]] void PanicShutdown(const char* msg) {
+		auto* rtServices = Runtime::GetServices();
+
 		Log::puts("------ KERNEL PANIC SHUTDOWN ------\n\r");
 		Log::puts("\tREASON: ");
 		Log::puts(msg);
