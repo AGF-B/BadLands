@@ -69,6 +69,12 @@ namespace Shared {
         inline constexpr uint64_t PTE_PK             = 0x7800000000000000;
         inline constexpr uint64_t PTE_XD             = 0x8000000000000000;
 
+        inline constexpr uint64_t PTE_WRITEBACK         = 0;
+        inline constexpr uint64_t PTE_WRITETHROUGH      = PTE_PWT;
+        inline constexpr uint64_t PTE_WEAK_UNCACHEABLE  = PTE_PCD;
+        inline constexpr uint64_t PTE_UNCACHEABLE       = PTE_PCD | PTE_PWT;
+        inline constexpr uint64_t PTE_WRITECOMBINING    = PTE_PAT;
+
         typedef uint64_t PTE;
         typedef uint64_t PDE;
         typedef uint64_t PDPTE;
