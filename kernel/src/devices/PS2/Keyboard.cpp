@@ -244,7 +244,7 @@ namespace Devices::PS2 {
 		}
 	}
 
-	StatusCode InitializeKeyboard(void) {
+	StatusCode InitializeKeyboard(FS::IFNode* keyboardMultiplex) {
 		Log::puts("[PS/2] Initializing keyboard\n\r");
 
 		// resets LEDs
@@ -309,6 +309,9 @@ namespace Devices::PS2 {
 		}
 
 		Log::puts("[PS/2] Keyboard scanning enabled\n\r");
+
+		keyboardMultiplexer = keyboardMultiplex;
+
 		Log::puts("[PS/2] Keyboard initialized\n\r");
 
 		return StatusCode::SUCCESS;

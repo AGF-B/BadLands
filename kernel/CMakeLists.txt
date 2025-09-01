@@ -16,6 +16,7 @@ add_library(KERNEL_IMG_ASM STATIC
 
 add_executable(KERNEL_IMG
     "src/acpi/Interface.cpp"
+    "src/devices/KeyboardDispatcher/Multiplexer.cpp"
     "src/devices/PS2/Keyboard.cpp"
     "src/devices/PS2/KeyboardEvent.cpp"
     "src/devices/PS2/Keypoints.cpp"
@@ -66,7 +67,7 @@ target_link_options(KERNEL_IMG PRIVATE
     -Wl,-e,KernelEntry
     -Wl,-T,../../kernel/linker.ld
     -Wl,--build-id=none
-    -s
+    #-s
     -z noexecstack
     -nolibc
     -nostdlib

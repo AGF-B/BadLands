@@ -2,13 +2,13 @@
 
 #include <cstdint>
 
+#include <devices/KeyboardDispatcher/Keypacket.hpp>
+
+#include <fs/IFNode.hpp>
+
 namespace Devices {
 	namespace PS2 {
-		struct BasicKeyPacket {
-			uint8_t scancode;
-			uint8_t keypoint;
-			uint8_t flags;
-		};
+		using BasicKeyPacket = Devices::KeyboardDispatcher::BasicKeyPacket;
 
 		enum class EventResponse {
 			IGNORE,
@@ -22,5 +22,6 @@ namespace Devices {
 		EventResponse KeyboardScanCodeSet3Handler(uint8_t byte, BasicKeyPacket* buffer);
 
 		extern EventResponse(*keyboardEventConverter)(uint8_t byte, BasicKeyPacket* buffer);
+		extern FS::IFNode* keyboardMultiplexer;
 	}
 }

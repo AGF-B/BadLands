@@ -5,6 +5,8 @@
 
 #include <acpi/Interface.hpp>
 
+#include <devices/KeyboardDispatcher/Keypacket.hpp>
+#include <devices/KeyboardDispatcher/Multiplexer.hpp>
 #include <devices/PS2/Controller.hpp>
 #include <devices/PS2/Keyboard.hpp>
 
@@ -79,7 +81,7 @@ namespace {
         return vfs;
     }
 
-    static inline void SetupPS2Keyboard() {
+    static inline void SetupPS2Keyboard(FS::IFNode* keyboardMultiplexer) {
         uint32_t status = 0;
 
         Log::puts("[PS/2] Initializing PS/2 platform...\n\r");
@@ -98,7 +100,7 @@ namespace {
             return;
         }
 
-        auto statusCode = Devices::PS2::InitializeKeyboard();
+        auto statusCode = Devices::PS2::InitializeKeyboard(keyboardMultiplexer);
 
         if (statusCode != Devices::PS2::StatusCode::SUCCESS) {
             Log::puts("[PS/2] Keyboard initialization failed\n\r");
@@ -149,15 +151,62 @@ LEGACY_EXPORT void KernelEntry() {
     VFS* vfs = SetupVFS();
     Log::puts("VFS Initialized\n\r");
 
+    Log::puts("[ENTRY] Creating VFS system hierarchy...\n\r");
+
+    static constexpr FS::DirectoryEntry RootEntry = { .NameLength = 2, .Name = "//" };
+    static constexpr FS::DirectoryEntry DeviceEntry = { .NameLength = 7, .Name = "Devices" };
+
+    auto response = vfs->Open(RootEntry);
+
+    if (response.CheckError()) {
+        Panic::PanicShutdown("[ENTRY] Could not open VFS root to create system hierarchy\n\r");
+    }
+
+    auto root = response.GetValue();
+
+    auto status = root->Create(DeviceEntry, FS::FileType::DIRECTORY);
+
+    if (status != FS::Status::SUCCESS) {
+        Panic::PanicShutdown("[ENTRY] Could not create VFS device interface\n\r");
+    }
+
+    response = root->Find(DeviceEntry);
+    root->Close();
+
+    if (response.CheckError()) {
+        Panic::PanicShutdown("[ENTRY] Could not open VFS device interface\n\r");
+    }
+
+    auto deviceInterface = response.GetValue();
+
+    Log::puts("[ENTRY] VFS system hierarchy created\n\r");
+
     ACPI::Initialize();
 
     APIC::Initialize();
 
     APIC::SetupLocalAPIC();
 
-    SetupPS2Keyboard();
+    auto* keyboardBuffer = Devices::KeyboardDispatcher::Initialize(deviceInterface);
+
+    SetupPS2Keyboard(keyboardBuffer);
 
     __asm__ volatile("sti");
+
+    while (1) {
+        Devices::KeyboardDispatcher::BasicKeyPacket packet;
+
+        auto v = keyboardBuffer->Read(0, sizeof(packet), reinterpret_cast<uint8_t*>(&packet));
+
+        if (v.CheckError()) {
+            Log::puts("Error reading\n\r");
+        }
+        else {
+            if (v.GetValue() > 0) {
+                Log::printf("Key: 0x%.2hhx, 0x%.2hhx, %s\n\r", packet.scancode, packet.keypoint, packet.flags != 0 ? "PRESSED" : "RELEASED");
+            }
+        }
+    }
 
     while (1) {
         __asm__ volatile("hlt");
