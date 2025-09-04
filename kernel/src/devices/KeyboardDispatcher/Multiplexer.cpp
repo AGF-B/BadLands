@@ -78,7 +78,6 @@ namespace {
 			size_t written_packets = packets > remaining_space ? remaining_space : packets;
 
 			for (size_t i = 0; i < written_packets; ++i, buffer += PACKET_SIZE) {
-				const BasicKeyPacket* packet = reinterpret_cast<const BasicKeyPacket*>(buffer);
 				Utils::memcpy(this->buffer + ((location + available_packets + i) % CAPACITY) * PACKET_SIZE, buffer, PACKET_SIZE);
 			}
 

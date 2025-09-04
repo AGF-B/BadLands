@@ -3,7 +3,7 @@
 #include <devices/PS2/Keypoints.hpp>
 
 namespace {
-    static inline consteval KEYPOINT(uint8_t row, uint8_t column) {
+    static inline consteval uint8_t KEYPOINT(uint8_t row, uint8_t column) {
         return ((row & 0x07) | ((column) & 0x1F) << 3);
     }
 

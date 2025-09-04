@@ -5,6 +5,7 @@
 
 #include <acpi/Interface.hpp>
 
+#include <devices/KeyboardDispatcher/Converter.hpp>
 #include <devices/KeyboardDispatcher/Keypacket.hpp>
 #include <devices/KeyboardDispatcher/Multiplexer.hpp>
 #include <devices/PS2/Controller.hpp>
@@ -203,7 +204,8 @@ LEGACY_EXPORT void KernelEntry() {
         }
         else {
             if (v.GetValue() > 0) {
-                Log::printf("Key: 0x%.2hhx, 0x%.2hhx, %s\n\r", packet.scancode, packet.keypoint, packet.flags != 0 ? "PRESSED" : "RELEASED");
+                auto vpkt = Devices::KeyboardDispatcher::GetVirtualKeyPacket(packet);
+                Log::printf("Key: 0x%.2hhx, 0x%.2hhx, %s\n\r", vpkt.keypoint, vpkt.keycode, vpkt.flags != 0 ? "PRESSED" : "RELEASED");
             }
         }
     }

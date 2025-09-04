@@ -14,8 +14,13 @@ add_library(KERNEL_IMG_ASM STATIC
     "src/mm/gdt.asm"
 )
 
+add_library(KERNEL_IMG_C STATIC
+    "src/devices/KeyboardDispatcher/KeycodeMap.c"
+)
+
 add_executable(KERNEL_IMG
     "src/acpi/Interface.cpp"
+    "src/devices/KeyboardDispatcher/Converter.cpp"
     "src/devices/KeyboardDispatcher/Multiplexer.cpp"
     "src/devices/PS2/Keyboard.cpp"
     "src/devices/PS2/KeyboardEvent.cpp"
@@ -43,6 +48,8 @@ set_target_properties(KERNEL_IMG PROPERTIES OUTPUT_NAME "kernel.img")
 
 target_include_directories(KERNEL_IMG PRIVATE include)
 target_include_directories(KERNEL_IMG PRIVATE ../common/include)
+target_include_directories(KERNEL_IMG_C PRIVATE include)
+target_include_directories(KERNEL_IMG_C PRIVATE ../common/include)
 
 target_compile_options(KERNEL_IMG PRIVATE
     -mabi=ms
@@ -62,12 +69,38 @@ target_compile_options(KERNEL_IMG PRIVATE
     -fno-rtti
     -flto
 )
+target_compile_options(KERNEL_IMG_C PRIVATE
+    -mabi=ms
+    -Wall
+    -Wextra
+    -fms-extensions
+    -mno-red-zone
+    -ffreestanding
+    -nostdlib
+    -nolibc
+    -mgeneral-regs-only
+    -D__EFI_STANDALONE__
+    -fno-pie
+    -mcmodel=large
+    -static
+    -fno-exceptions
+    -flto
+    -std=c2x
+)
 
 target_link_options(KERNEL_IMG PRIVATE
     -Wl,-e,KernelEntry
     -Wl,-T,../../kernel/linker.ld
     -Wl,--build-id=none
-    #-s
+    -s
+    -z noexecstack
+    -nolibc
+    -nostdlib
+    -flto
+)
+target_link_options(KERNEL_IMG_C PRIVATE
+    -Wl,--build-id=none
+    -s
     -z noexecstack
     -nolibc
     -nostdlib
@@ -76,4 +109,4 @@ target_link_options(KERNEL_IMG PRIVATE
 
 target_compile_features(KERNEL_IMG PRIVATE cxx_std_23)
 
-target_link_libraries(KERNEL_IMG PRIVATE KERNEL_IMG_ASM -static)
+target_link_libraries(KERNEL_IMG PRIVATE KERNEL_IMG_ASM KERNEL_IMG_C -static)
