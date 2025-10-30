@@ -37,7 +37,7 @@ FS::Status VFS::HandleApplicationPath(const FS::DirectoryEntry& filepath, FS::Di
         current.Name = filepath.Name + 1;
     }
     else {
-        ++current.Name;
+        current.Name = filepath.Name + 2;
     }
 
     return FS::Status::SUCCESS;
@@ -80,6 +80,8 @@ bool VFS::Construct(VFS* fs) {
     return true;
 }
 
+#include <screen/Log.hpp>
+
 FS::Response<FS::IFNode*> VFS::OpenParent(const FS::DirectoryEntry& filepath, FS::DirectoryEntry& filename) {
     if (!CheckFilePath(filepath)) {
         return FS::Response<FS::IFNode*>(FS::Status::INVALID_PARAMETER);
@@ -93,7 +95,8 @@ FS::Response<FS::IFNode*> VFS::OpenParent(const FS::DirectoryEntry& filepath, FS
 
     filename = extracted.GetValue();
 
-    FS::DirectoryEntry parentpath = { .NameLength = filepath.NameLength - filename.NameLength, .Name = filepath.Name };
+    const size_t parentPathLength = (size_t)(filename.Name - filepath.Name);
+    FS::DirectoryEntry parentpath = { .NameLength = parentPathLength, .Name = filepath.Name };
 
     auto status = root.Open();
 
@@ -133,7 +136,6 @@ FS::Response<FS::IFNode*> VFS::OpenParent(const FS::DirectoryEntry& filepath, FS
         }
         else {
             ++current.NameLength;
-            ++current.Name;
         }
     }
 
