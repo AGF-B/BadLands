@@ -1,5 +1,7 @@
 #include <cstdint>
 
+#include <exports.hpp>
+
 #include <shared/efi/efi.h>
 #include <shared/memory/layout.hpp>
 
@@ -24,6 +26,8 @@
 #include <mm/VirtualMemory.hpp>
 
 #include <screen/Log.hpp>
+
+#include <services/shell.hpp>
 
 #define LEGACY_EXPORT extern "C"
 
@@ -127,7 +131,10 @@ namespace {
     }
 }
 
-#include <cpuid.h>
+Kernel::KernelExports Kernel::Exports = {
+    .vfs = nullptr,
+    .deviceInterface = nullptr
+};
 
 LEGACY_EXPORT void KernelEntry() {
     __asm__ volatile("cli");
@@ -150,6 +157,7 @@ LEGACY_EXPORT void KernelEntry() {
     Log::puts("KERNEL HEAP Initialized\n\r");
 
     VFS* vfs = SetupVFS();
+    Kernel::Exports.vfs = vfs;
     Log::puts("VFS Initialized\n\r");
 
     Log::puts("[ENTRY] Creating VFS system hierarchy...\n\r");
@@ -179,6 +187,7 @@ LEGACY_EXPORT void KernelEntry() {
     }
 
     auto deviceInterface = response.GetValue();
+    Kernel::Exports.deviceInterface = deviceInterface;
 
     Log::puts("[ENTRY] VFS system hierarchy created\n\r");
 
@@ -194,21 +203,23 @@ LEGACY_EXPORT void KernelEntry() {
 
     __asm__ volatile("sti");
 
-    while (1) {
-        Devices::KeyboardDispatcher::BasicKeyPacket packet;
+    // while (1) {
+    //     Devices::KeyboardDispatcher::BasicKeyPacket packet;
 
-        auto v = keyboardBuffer->Read(0, sizeof(packet), reinterpret_cast<uint8_t*>(&packet));
+    //     auto v = keyboardBuffer->Read(0, sizeof(packet), reinterpret_cast<uint8_t*>(&packet));
 
-        if (v.CheckError()) {
-            Log::puts("Error reading\n\r");
-        }
-        else {
-            if (v.GetValue() > 0) {
-                auto vpkt = Devices::KeyboardDispatcher::GetVirtualKeyPacket(packet);
-                Log::printf("Key: 0x%.2hhx, 0x%.2hhx, %s\n\r", vpkt.keypoint, vpkt.keycode, vpkt.flags != 0 ? "PRESSED" : "RELEASED");
-            }
-        }
-    }
+    //     if (v.CheckError()) {
+    //         Log::puts("Error reading\n\r");
+    //     }
+    //     else {
+    //         if (v.GetValue() > 0) {
+    //             auto vpkt = Devices::KeyboardDispatcher::GetVirtualKeyPacket(packet);
+    //             Log::printf("Key: 0x%.2hhx, 0x%.2hhx, %s\n\r", vpkt.keypoint, vpkt.keycode, vpkt.flags != 0 ? "PRESSED" : "RELEASED");
+    //         }
+    //     }
+    // }
+
+    Services::Shell::Entry();
 
     while (1) {
         __asm__ volatile("hlt");

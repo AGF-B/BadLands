@@ -18,6 +18,10 @@ add_library(KERNEL_IMG_C STATIC
     "src/devices/KeyboardDispatcher/KeycodeMap.c"
 )
 
+add_library(KERNEL_SVC STATIC
+    "src/services/shell/entry.cpp"
+)
+
 add_executable(KERNEL_IMG
     "src/acpi/Interface.cpp"
     "src/devices/KeyboardDispatcher/Converter.cpp"
@@ -50,6 +54,8 @@ target_include_directories(KERNEL_IMG PRIVATE include)
 target_include_directories(KERNEL_IMG PRIVATE ../common/include)
 target_include_directories(KERNEL_IMG_C PRIVATE include)
 target_include_directories(KERNEL_IMG_C PRIVATE ../common/include)
+target_include_directories(KERNEL_SVC PRIVATE include)
+target_include_directories(KERNEL_SVC PRIVATE ../common/include)
 
 target_compile_options(KERNEL_IMG PRIVATE
     -mabi=ms
@@ -87,6 +93,24 @@ target_compile_options(KERNEL_IMG_C PRIVATE
     -flto
     -std=c2x
 )
+target_compile_options(KERNEL_SVC PRIVATE
+    -mabi=ms
+    -Wall
+    -Wextra
+    -fms-extensions
+    -mno-red-zone
+    -ffreestanding
+    -nostdlib
+    -nolibc
+    -mgeneral-regs-only
+    -D__EFI_STANDALONE__
+    -fno-pie
+    -mcmodel=large
+    -static
+    -fno-exceptions
+    -fno-rtti
+    -flto
+)
 
 target_link_options(KERNEL_IMG PRIVATE
     -Wl,-e,KernelEntry
@@ -106,7 +130,16 @@ target_link_options(KERNEL_IMG_C PRIVATE
     -nostdlib
     -flto
 )
+target_link_options(KERNEL_SVC PRIVATE
+    -Wl,--build-id=none
+    -s
+    -z noexecstack
+    -nolibc
+    -nostdlib
+    -flto
+)
 
 target_compile_features(KERNEL_IMG PRIVATE cxx_std_23)
+target_compile_features(KERNEL_SVC PRIVATE cxx_std_23)
 
-target_link_libraries(KERNEL_IMG PRIVATE KERNEL_IMG_ASM KERNEL_IMG_C -static)
+target_link_libraries(KERNEL_IMG PRIVATE KERNEL_IMG_ASM KERNEL_IMG_C KERNEL_SVC -static)
