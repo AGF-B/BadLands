@@ -1,3 +1,4 @@
+mkdir -p simulation
 cd simulation
 
 if [ ! -f disk.img ]; then
@@ -10,4 +11,4 @@ fi
 
 mcopy -o -Q -i disk.img@@1M ../build/BOOTX64.EFI ::/EFI/BOOT
 mcopy -o -Q -i disk.img@@1M ../build/kernel.img ::/EFI/BOOT
-mcopy -o -Q -i disk.img@@1M psf_font.psf ::/EFI/BOOT
+mcopy -o -Q -i disk.img@@1M ../assets/psf_font.psf ::/EFI/BOOT
