@@ -1,5 +1,7 @@
 #include <cstdint>
 
+#include <new>
+
 #include <shared/Lock.hpp>
 #include <shared/LockGuard.hpp>
 
