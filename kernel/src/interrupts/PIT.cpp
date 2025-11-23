@@ -37,16 +37,16 @@ namespace {
     static constexpr uint16_t PIT_MODE_REGISTER  = 0x43;
 
     static constexpr uint8_t PIT_COMMAND_BYTE = 0x34;
-    static constexpr uint16_t PIT_RELOAD_VALUE = 119;
+    static constexpr uint16_t PIT_RELOAD_VALUE = 1193;
 
     static constexpr uint8_t ISA_IRQ_PORT = 0;
 
-    static constexpr uint8_t PIT_INTERVAL_MICROS = 100;
+    static constexpr uint8_t PIT_INTERVAL_MILLIS = 1;
 
     static int vector = -1;
     static bool enabled = false;
     static void (*pit_handler)() = nullptr;
-    static volatile uint64_t micro_counter = 0;
+    static volatile uint64_t millis_counter = 0;
 
     static void trampoline([[maybe_unused]] void* sp, [[maybe_unused]] uint64_t errv) {
         PIT::HandleInterrupt();
@@ -59,7 +59,7 @@ namespace {
 
 namespace PIT {
     void Initialize() {
-        micro_counter = 0;
+        millis_counter = 0;
 
         vector = Interrupts::ReserveInterrupt();
 
@@ -112,7 +112,7 @@ namespace PIT {
     }
 
     void SignalIRQ() {
-        micro_counter += PIT_INTERVAL_MICROS;
+        millis_counter += PIT_INTERVAL_MILLIS;
     }
 
     void SendEOI() {
@@ -134,10 +134,10 @@ namespace PIT {
     }
 
     uint64_t GetCountMicros() {
-        return micro_counter;
+        return millis_counter * 1000;
     }
 
     uint64_t GetCountMillis() {
-        return micro_counter / 1000;
+        return millis_counter;
     }
 }
