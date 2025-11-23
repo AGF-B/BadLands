@@ -31,6 +31,8 @@ enum class INTTYPE {
 	TRAP
 };
 
+extern "C" void (*IDT_STUB_TABLE[])();
+
 namespace {
 	static constexpr uint16_t FLAGS_PRESENT		    = 0x8000;
 
@@ -46,8 +48,6 @@ namespace {
 	static constexpr uint16_t SS_CODE_USER_GDT	    = 0x0018;
 
     static constexpr size_t IDT_ENTRIES = 256;
-
-	extern "C" void (*IDT_STUB_TABLE[])();
 
 	alignas(Shared::Memory::FRAME_SIZE) static IDTDescriptor IDT[256];
 	static Interrupts::InterruptProvider* providers[0x100] = { nullptr };
