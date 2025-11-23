@@ -29,11 +29,6 @@ namespace {
 		rtServices->ResetSystem(EfiResetShutdown, EFI_ABORTED, 0, nullptr);
 		kernelPanicShutdownFailed();
 	}
-
-	// this function is undocumented in the C++ headers, and should only be used by assembly code
-	// extern "C" [[noreturn]] void _legacy_kpanic(const char* msg, uint64_t errv) {
-	// 	Panic::Panic(msg, errv);
-	// }
 }
 
 namespace Panic {
@@ -52,7 +47,7 @@ namespace Panic {
         }
     }
 
-	[[noreturn]] void Panic(const char* msg, uint64_t errv) {
+	[[noreturn]] void Panic(void* panic_stack, const char* msg, uint64_t errv) {
 		Log::puts("\n\r------ KERNEL PANIC ------\n\r");
 
 		if (msg != nullptr) {
@@ -61,7 +56,7 @@ namespace Panic {
 			Log::puts("\n\r");
 		}
 
-		Panic::DumpCore(errv);
+		Panic::DumpCore(panic_stack, errv);
 
 		__asm__ volatile("cli");
 		while (1) {

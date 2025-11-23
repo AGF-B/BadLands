@@ -3,7 +3,9 @@
 
 #include <shared/memory/defs.hpp>
 
+#include <interrupts/InterruptProvider.hpp>
 #include <interrupts/Panic.hpp>
+
 #include <mm/PhysicalMemory.hpp>
 #include <mm/VirtualMemory.hpp>
 
@@ -20,9 +22,9 @@ namespace {
     static inline constexpr uint64_t PF_HLAT                        = 0x00000080;
     static inline constexpr uint64_t PF_SGX_VIOLATION               = 0x00008000;
 
-    extern "C" void page_fault_handler(uint64_t errv) {
+    static void PageFaultHandler(void* sp, uint64_t errv) {
         if ((errv & PF_PRESENT) == 1) {
-            Panic::Panic("PAGE FAULT VIOLATION\n\r", errv);
+            Panic::Panic(sp, "PAGE FAULT VIOLATION\n\r", errv);
         }
         else {
             uint64_t CR2 = 0;
@@ -47,7 +49,7 @@ namespace {
                 || (*pdpte & ShdMem::PDPTE_PRESENT) == 0
                 || (*pde & ShdMem::PDE_PRESENT) == 0
                 || *pte == 0) {
-                Panic::Panic("WHAT DID YOU THINK WOULD HAPPEN??\n\r", errv);
+                Panic::Panic(sp, "WHAT DID YOU THINK WOULD HAPPEN??\n\r", errv);
             }
             
             uint64_t PRESENT = ShdMem::PTE_PRESENT;
@@ -60,12 +62,12 @@ namespace {
             uint64_t PK = (*pte & VirtualMemory::NP_PK) << 34;
             
             if ((*pte & VirtualMemory::NP_ON_DEMAND) == 0) {
-                Panic::Panic("MEMORY SWAPPING UNSUPPORTED\n\r", errv);
+                Panic::Panic(sp, "MEMORY SWAPPING UNSUPPORTED\n\r", errv);
             }
             else {
                 void* page = PhysicalMemory::Allocate();
                 if (page == nullptr) {
-                    Panic::Panic("THE COCONUT WENT NUTS (OUT OF MEMORY)\n\r", errv);
+                    Panic::Panic(sp, "THE COCONUT WENT NUTS (OUT OF MEMORY)\n\r", errv);
                 }
 
                 *pte = PK
@@ -80,4 +82,8 @@ namespace {
             }
         }
     }
+}
+
+namespace Interrupts::Core {
+    InterruptTrampoline page_fault_trampoline(PageFaultHandler);
 }

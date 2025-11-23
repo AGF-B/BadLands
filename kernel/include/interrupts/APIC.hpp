@@ -37,12 +37,40 @@ namespace APIC {
 		uint8_t Destination;
 	};
 
+	namespace Timer {
+		enum class Mode {
+			ONE_SHOT,
+			PERIODIC,
+			TSC_DEADLINE
+		};
+
+		enum class DivideConfiguration {
+			BY_1,
+			BY_2,
+			BY_4,
+			BY_8,
+			BY_16,
+			BY_32,
+			BY_64,
+			BY_128
+		};
+
+		void SetTimerLVT(uint8_t vector, Mode mode);
+		void SetTimerDivideConfiguration(DivideConfiguration config);
+		void SetTimerInitialCount(uint32_t count);
+		uint32_t GetTimerCurrentCount();
+		void UnmaskTimerLVT();
+		void MaskTimerLVT();
+	};
+
 	void Initialize();
 
 	void SetupLocalAPIC();
 	uint8_t GetLAPICLogicalID();
+	uint8_t GetLAPICID();
 	void SendEOI();
 
 	void MaskIRQ(uint32_t irq);
+	void UnmaskIRQ(uint32_t irq);
 	void SetupIRQ(uint32_t irq, IRQDescriptor descriptor);
 }

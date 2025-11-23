@@ -48,8 +48,13 @@ namespace Shared {
                 .limit = 0x0000000004000000
             };
 
-            inline constexpr MemoryZone AcpiNvs {
+            inline constexpr MemoryZone ScreenBackBuffer {
                 .start = EfiGopFramebuffer.end(),
+                .limit = 0x0000000004000000
+            };
+
+            inline constexpr MemoryZone AcpiNvs {
+                .start = ScreenBackBuffer.end(),
                 .limit = 0x0000000002000000
             };
 

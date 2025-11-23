@@ -6,6 +6,6 @@
 
 namespace Panic {
 	[[noreturn]] void Panic(const char* msg);
-	[[noreturn]] void Panic(const char* msg, uint64_t errv);
-	[[noreturn]] void PanicShutdown( const char* msg);
+	[[noreturn]] void Panic(void* panic_stack, const char* msg, uint64_t errv);
+	[[noreturn]] void PanicShutdown(const char* msg);
 }

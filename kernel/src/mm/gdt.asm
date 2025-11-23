@@ -6,6 +6,7 @@ global kernel_gdt_setup
 %define TSS_SEGMENT		0x0028
 
 %define KERNEL_STACK	0xFFFFFF80000FF000
+%define IST1_STACK      
 
 section .data
 	align 8

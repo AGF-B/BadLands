@@ -9,7 +9,8 @@
 #include <ext/BasicHashMap.hpp>
 
 #include <interrupts/APIC.hpp>
-#include <interrupts/idt.hpp>
+#include <interrupts/IDT.hpp>
+#include <interrupts/InterruptProvider.hpp>
 #include <interrupts/Panic.hpp>
 #include <interrupts/PIC.hpp>
 
@@ -52,6 +53,8 @@ namespace {
 		alignas(0x10) volatile			uint32_t Reserved_4;
 
 	public:
+		static void SpuriousHandler(void*,uint64_t) {}
+
 		uint8_t GetID() const {
 			return (ID_REG >> 24) & 0xFF;
 		}
@@ -79,6 +82,47 @@ namespace {
 
 		void ResetESR() {
 			ESR = 0;
+		}
+
+		void SetTimerLVT(uint8_t vector, APIC::Timer::Mode mode) {
+			const uint32_t timer_mode =
+				mode == APIC::Timer::Mode::ONE_SHOT ? 0 :
+				mode == APIC::Timer::Mode::PERIODIC ? 1 :
+				mode == APIC::Timer::Mode::TSC_DEADLINE ? 2
+				: 0;
+
+			LVT_TIMER = (timer_mode << 17) | 0x00010000 | static_cast<uint32_t>(vector);
+		}
+
+		void SetTimerDivideConfiguration(APIC::Timer::DivideConfiguration config) {
+			const uint32_t divide_value =
+				config == APIC::Timer::DivideConfiguration::BY_1 ? 0b1011 :
+				config == APIC::Timer::DivideConfiguration::BY_2 ? 0b0000 :
+				config == APIC::Timer::DivideConfiguration::BY_4 ? 0b0001 :
+				config == APIC::Timer::DivideConfiguration::BY_8 ? 0b0010 :
+				config == APIC::Timer::DivideConfiguration::BY_16 ? 0b0011 :
+				config == APIC::Timer::DivideConfiguration::BY_32 ? 0b1000 :
+				config == APIC::Timer::DivideConfiguration::BY_64 ? 0b1001 :
+				config == APIC::Timer::DivideConfiguration::BY_128 ? 0b1010
+				: 0b1011;
+
+			TIMER_DIVIDE_CONFIGURATION = divide_value;
+		}
+
+		void SetTimerInitialCount(uint32_t count) {
+			TIMER_INITIAL_COUNT = count;
+		}
+
+		uint32_t GetTimerCurrentCount() {
+			return TIMER_CURRENT_COUNT;
+		}
+
+		void UnmaskTimerLVT() {
+			LVT_TIMER &= ~0x00010000;
+		}
+
+		void MaskTimerLVT() {
+			LVT_TIMER |= 0x00010000;
 		}
 	};
 
@@ -243,6 +287,13 @@ namespace {
 			}
 		}
 
+		void UnmaskRedirectionEntry(uint8_t index) {
+			if (index < GetRedirectionsCount()) {
+				IOREGSEL = IOREDTBL + index * 2;
+				IOWIN &= ~RTE_MASK;
+			}
+		}
+
 		void SetupRedirectionEntry(uint8_t index, APIC::IRQDescriptor descriptor) {
 			if (index < GetRedirectionsCount()) {
 				uint64_t rte = 0;
@@ -310,6 +361,11 @@ namespace {
 	static Ext::BasicHashMap<uint32_t, LAPIC, 64> LAPICs;
 	static Ext::BasicHashMap<uint32_t, IOAPIC, 16, 1> IOAPICs;
 
+	static Interrupts::InterruptTrampoline PIC_SpuriousTrampoline(
+		reinterpret_cast<void(*)(void*,uint64_t)>(&PIC::SpuriousPIC)
+	);
+	static Interrupts::InterruptTrampoline LocalAPICSpuriousTrampoline(LocalAPIC->SpuriousHandler);
+
 	static IntOverride InterruptOverrides[0x100];
 
 	uint8_t ReserveLogicalID() {
@@ -321,6 +377,32 @@ namespace {
 }
 
 namespace APIC {
+	namespace Timer {
+		void SetTimerLVT(uint8_t vector, Mode mode) {
+			LocalAPIC->SetTimerLVT(vector, mode);
+		}
+
+		void SetTimerDivideConfiguration(DivideConfiguration config) {
+			LocalAPIC->SetTimerDivideConfiguration(config);
+		}
+
+		void SetTimerInitialCount(uint32_t count) {
+			LocalAPIC->SetTimerInitialCount(count);
+		}
+
+		uint32_t GetTimerCurrentCount() {
+			return LocalAPIC->GetTimerCurrentCount();
+		}
+
+		void UnmaskTimerLVT() {
+			LocalAPIC->UnmaskTimerLVT();
+		}
+
+		void MaskTimerLVT() {
+			LocalAPIC->MaskTimerLVT();
+		}
+	}
+	
 	void Initialize() {
 		Log::puts("[APIC] Initializing APIC platform...\n\r");
 
@@ -354,8 +436,8 @@ namespace APIC {
 			Log::puts("[APIC] Dual-8259A setup detected. Initializing it to disable it...\n\r");
 			
 			for (unsigned int i = 0; i < 8; ++i) {
-				Interrupts::RegisterIRQ(PIC::MasterPIC_IRQ_Remap + i, PIC::SpuriousPIC, false);
-				Interrupts::RegisterIRQ(PIC::SlavePIC_IRQ_Remap + i, PIC::SpuriousPIC, false);
+				Interrupts::RegisterIRQ(PIC::MasterPIC_IRQ_Remap + i, &PIC_SpuriousTrampoline);
+				Interrupts::RegisterIRQ(PIC::SlavePIC_IRQ_Remap + i, &PIC_SpuriousTrampoline);
 			}
 
 			PIC::InitializePIC();
@@ -533,7 +615,7 @@ namespace APIC {
 		static constexpr uint32_t SVR_CONFIG = 0x000001FF;
 		static constexpr uint8_t SPURIOUS_IRQ_VECTOR = 0xFF;
 
-		Interrupts::RegisterIRQ(SPURIOUS_IRQ_VECTOR, PIC::SpuriousPIC, false);
+		Interrupts::RegisterIRQ(SPURIOUS_IRQ_VECTOR, &LocalAPICSpuriousTrampoline);
 
 		LocalAPIC->SetSVR(SVR_CONFIG);
 		LocalAPIC->ResetESR();
@@ -553,6 +635,10 @@ namespace APIC {
 		return LocalAPIC->GetLogicalID();
 	}
 
+	uint8_t GetLAPICID() {
+		return LocalAPIC->GetID();
+	}
+
 	void SendEOI() {
 		LocalAPIC->SendEOI();
 	}
@@ -570,6 +656,23 @@ namespace APIC {
 				uint8_t pin = static_cast<uint8_t>(irq - base);
 
 				ioapic->VirtualAddress->MaskRedirectionEntry(pin);
+			}
+		}
+	}
+
+	void UnmaskIRQ(uint32_t irq) {
+		if (irq < 0x100) {
+			irq = InterruptOverrides[irq].GlobalSystemInterrupt;
+		}
+
+		for (auto* ioapic : IOAPICs) {
+			uint32_t base = ioapic->GlobalSystemInterruptBase;
+			uint32_t rteCount = ioapic->VirtualAddress->GetRedirectionsCount();
+
+			if (base <= irq && irq < base + rteCount) {
+				uint8_t pin = static_cast<uint8_t>(irq - base);
+
+				ioapic->VirtualAddress->UnmaskRedirectionEntry(pin);
 			}
 		}
 	}

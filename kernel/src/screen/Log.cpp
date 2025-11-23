@@ -41,31 +41,19 @@ namespace {
         Shared::Memory::Layout::OsLoaderFont.start
     );
 
-	static inline constexpr uint32_t* getPixelAddress(uint32_t x, uint32_t y) {
-		return &screenInfo.framebuffer[y * screenInfo.ppsl + x];
-	}
-
 	static inline constexpr uint32_t getFontPixel(unsigned int codepoint, uint32_t row, uint32_t column) {
 		const uint8_t rowByte = *(reinterpret_cast<const uint8_t*>(FONT_HEADER + 1) + GLYPH_HEIGHT * codepoint + row);
 		return rowByte & (GLYPH_COLUMN_MASK >> column);
 	}
 
-	static inline void scrollLine(uint32_t row) {
-		/// TODO: Use back buffer to avoid reading from video memory, which is insanely slow
-		for (size_t x = 0; x < screenInfo.width; ++x) {
-			*getPixelAddress(x, row - GLYPH_HEIGHT) = *getPixelAddress(x, row);
-		}
-	}
-
 	static inline void scroll() {
-		for (size_t y = GLYPH_HEIGHT; y < screenInfo.height; ++y) {
-			scrollLine(y);
-		}
+		Framebuffer::Scroll(GLYPH_HEIGHT);
 		for (size_t y = screenInfo.height - GLYPH_HEIGHT; y < screenInfo.height; ++y) {
 			for (size_t x = 0; x < screenInfo.width; ++x) {
-				*getPixelAddress(x, y) = screenContext.background;
+				Framebuffer::Write(x, y, screenContext.background);
 			}
 		}
+		Framebuffer::Flush();
 	}
 
 	static inline void carriageReturn() {
@@ -86,12 +74,12 @@ namespace {
 
 namespace Log {
 	void Setup() {
-		Framebuffer::Info info = Framebuffer::Setup();
+		Framebuffer::Setup();
+		auto info = Framebuffer::RequestInfo();
 
 		screenInfo.width = info.XResolution;
 		screenInfo.height = info.YResolution;
 		screenInfo.ppsl = info.PixelsPerScanLine;
-		screenInfo.framebuffer = info.Address;
 
 		screenContext.x = 0;
 		screenContext.y = 0;
@@ -111,9 +99,11 @@ namespace Log {
 
 		for (size_t r = 0; r < GLYPH_HEIGHT; ++r) {
 			for (size_t c = 0; c < GLYPH_WIDTH; ++c) {
-				*getPixelAddress(x + c, y + r) = getFontPixel(codepoint, r, c) ? screenContext.foreground : screenContext.background;
+				Framebuffer::Write(x + c, y + r, getFontPixel(codepoint, r, c) ? screenContext.foreground : screenContext.background);
 			}
 		}
+
+		Framebuffer::FlushRect(x, y, GLYPH_WIDTH, GLYPH_HEIGHT);
 	}
 
 	void putc(char c) {

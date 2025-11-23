@@ -157,7 +157,9 @@ namespace {
             *_len = precision;
         }
     }
+}
 
+namespace Log {
     void vprintf(const char* format, va_list vlist) {
         char c;
 
@@ -558,9 +560,7 @@ namespace {
             }
         }
     }
-}
-
-namespace Log {
+    
     void printf(const char* format, ...) {
         va_list args;
         va_start(args, format);

@@ -5,36 +5,116 @@
 #include <shared/memory/layout.hpp>
 
 #include <screen/Framebuffer.hpp>
+#include <screen/Log.hpp>
 
 namespace VML = Shared::Memory::Layout;
 
 namespace {
+    static uint32_t* address = nullptr;
+    static uint32_t* back = nullptr;
     static Framebuffer::Info info;
+    static uint64_t y_disp = 0;
 }
 
 namespace Framebuffer {
-    Info Setup() {
+    void Setup() {
         Shared::Graphics::BasicGraphics* GFXData = reinterpret_cast<Shared::Graphics::BasicGraphics*>(
             VML::OsLoaderData.start + VML::OsLoaderDataOffsets.GFXData
         );
 
         info.Size = GFXData->FBSIZE;
-        info.Address = GFXData->FBADDR;
+        address = GFXData->FBADDR;
 
 		info.XResolution = GFXData->ResX;
 		info.YResolution = GFXData->ResY;
 		info.PixelsPerScanLine = GFXData->PPSL;
 
+        back = (uint32_t*)Shared::Memory::Layout::ScreenBackBuffer.start;
+
         for (size_t r = 0; r < info.YResolution; ++r) {
             for(size_t c = 0; c < info.XResolution; ++c) {
-                info.Address[r * info.PixelsPerScanLine + c] = 0;
+                address[r * info.PixelsPerScanLine + c] = 0;
+                back[r * info.PixelsPerScanLine + c] = 0;
             }
         }
-
-        return info;
     }
 
     Info RequestInfo() {
         return info;
+    }
+
+    void WriteAndFlush(uint32_t x, uint32_t y, uint32_t p) {
+        back[((y + y_disp) % info.YResolution) * info.PixelsPerScanLine + x] = p;
+        address[y * info.PixelsPerScanLine + x] = p;
+    }
+
+    uint32_t Read(uint32_t x, uint32_t y) {
+        return back[((y + y_disp) % info.YResolution) * info.PixelsPerScanLine + x];
+    }
+
+    void Write(uint32_t x, uint32_t y, uint32_t p) {
+        back[((y + y_disp) % info.YResolution) * info.PixelsPerScanLine + x] = p;
+    }
+
+    void FlushRect(uint32_t x, uint32_t y, uint32_t width, uint32_t height) {
+        if (y + height > info.YResolution) {
+            height = info.YResolution - y;
+        }
+
+        if (x + width > info.XResolution) {
+            width = info.XResolution - x;
+        }
+        
+        for (uint32_t row = 0; row < height; ++row) {
+            uint32_t screen_y = y + row;
+            
+            uint32_t* dest_row = &address[screen_y * info.PixelsPerScanLine + x];
+            uint32_t* src_row = &back[((screen_y + y_disp) % info.YResolution) * info.PixelsPerScanLine + x];
+            uint32_t bytes_to_copy = width * sizeof(uint32_t);
+
+            __asm__ volatile(
+                "rep movsb"
+                : "=D"(dest_row), "=S"(src_row), "=c"(bytes_to_copy)
+                : "0"(dest_row), "1"(src_row), "2"(bytes_to_copy)
+                : "memory"
+            );
+        }
+    }
+
+    void Flush() {
+        uint32_t lo, hi;
+        __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi));
+        uint64_t begin_tsc = ((static_cast<uint64_t>(hi) << 32) | lo);
+        __asm__ volatile("lfence");
+
+        for (size_t y = 0; y < info.YResolution; ++y) {
+            uint32_t* dest_row = &address[y * info.PixelsPerScanLine];
+            uint32_t* src_row  = &back[((y + y_disp) % info.YResolution) * info.PixelsPerScanLine];
+            uint64_t bytes_to_copy = info.XResolution / 2;
+
+            __asm__ volatile(
+                "rep movsq"
+                : "=D"(dest_row), "=S"(src_row), "=c"(bytes_to_copy)
+                : "0"(dest_row), "1"(src_row), "2"(bytes_to_copy)
+                : "memory"
+            );
+        }
+
+        __asm__ volatile("lfence");
+        __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi));
+        // uint64_t end_tsc = ((static_cast<uint64_t>(hi) << 32) | lo);
+        // volatile uint64_t tsc_diff = end_tsc - begin_tsc;
+        // uint64_t pixels_count = static_cast<uint64_t>(info.XResolution) * static_cast<uint64_t>(info.YResolution);
+        // Log::printfSafe("Framebuffer Flush: %llu pixels in %llu TSC (%llu TSC/pixel)",
+        //     pixels_count,
+        //     tsc_diff,
+        //     tsc_diff / pixels_count
+        // );
+
+        // __asm__ volatile("jmp .");
+    }
+
+    void Scroll(uint64_t dy) {
+        y_disp = (y_disp + dy) % info.YResolution;
     }
 }

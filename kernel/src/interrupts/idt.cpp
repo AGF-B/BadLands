@@ -4,7 +4,11 @@
 #include <shared/memory/defs.hpp>
 
 #include <interrupts/Core.hpp>
-#include <interrupts/idt.hpp>
+#include <interrupts/IDT.hpp>
+#include <interrupts/InterruptProvider.hpp>
+#include <interrupts/Panic.hpp>
+
+#include <screen/Log.hpp>
 
 struct IDTDescriptor {
 	uint16_t offset0_15;
@@ -43,7 +47,21 @@ namespace {
 
     static constexpr size_t IDT_ENTRIES = 256;
 
+	extern "C" void (*IDT_STUB_TABLE[])();
+
 	alignas(Shared::Memory::FRAME_SIZE) static IDTDescriptor IDT[256];
+	static Interrupts::InterruptProvider* providers[0x100] = { nullptr };
+	static uint64_t int_usage_map[0x100 / 64] = { 0 };
+
+	extern "C" void IDT_INTERRUPT_DISPATCHER(void* stack, uint64_t error_code, uint8_t vector_number) {
+		if (providers[vector_number] != nullptr) {
+			providers[vector_number]->HandleIRQ(stack, error_code);
+		}
+		else {
+			Log::printf("Unhandled interrupt: vector 0x%0.2hhx\n\r", vector_number);
+			Panic::Panic("UNHANDLED INTERRUPT\n\r");
+		}
+	}
 
     static inline void registerCoreInterrupt(size_t intn, void(*_handler)(void), INTDPL dpl, INTTYPE type) {
 		const uint64_t handler = reinterpret_cast<uint64_t>(_handler);
@@ -82,6 +100,36 @@ namespace {
 		descriptor->offset32_63 = static_cast<uint32_t>(handler >> 32);
 		descriptor->reserved = 0;
 	}
+
+	static inline void registerProvider(size_t intn, Interrupts::InterruptProvider* provider) {
+		if (intn < 0x100) {
+			providers[intn] = provider;
+		}
+	}
+
+	static void ReserveKnownInterrupt(int i) {
+		if (i < 0x100) {
+			int_usage_map[i / 64] |= (1 << (i % 64));
+		}
+	}
+
+	static int ReserveInterrupt() {
+		for (int i = 0; i < 0x100; ++i) {
+			if ((int_usage_map[i / 64] & (1 << (i % 64))) == 0) {
+				ReserveKnownInterrupt(i);
+				return i;
+			}
+		}
+
+		return -1;
+	}
+
+	static void ReleaseInterrupt(int i) {
+		if (i < 0x100) {
+			int_usage_map[i / 64] &= ~(1 << (i % 64));
+			providers[i] = nullptr;
+		}
+	}
 }
 
 void Interrupts::kernel_idt_setup() {
@@ -100,7 +148,7 @@ void Interrupts::kernel_idt_setup() {
 // 	registerCoreInterrupt(11, &Interrupts::Core::int_segpresence_error,			INTDPL::DPL0, INTTYPE::EXCEPTION);
 // 	registerCoreInterrupt(12, &Interrupts::Core::int_stack_error,				INTDPL::DPL0, INTTYPE::EXCEPTION);
 // 	registerCoreInterrupt(13, &Interrupts::Core::int_gp_error,					INTDPL::DPL0, INTTYPE::EXCEPTION);
- 	registerCoreInterrupt(14, &Interrupts::Core::int_page_error,				INTDPL::DPL0, INTTYPE::EXCEPTION);
+registerProvider(14, &Interrupts::Core::page_fault_trampoline);
 // 	registerCoreInterrupt(16, &Interrupts::Core::int_x87fp_error,				INTDPL::DPL0, INTTYPE::EXCEPTION);
 // 	registerCoreInterrupt(17, &Interrupts::Core::int_align_error,				INTDPL::DPL0, INTTYPE::EXCEPTION);
 // 	registerCoreInterrupt(18, &Interrupts::Core::int_machine_error,				INTDPL::DPL0, INTTYPE::EXCEPTION);
@@ -111,13 +159,50 @@ void Interrupts::kernel_idt_setup() {
 // 	registerCoreInterrupt(29, &Interrupts::Core::int_vmmcom_error,				INTDPL::DPL0, INTTYPE::EXCEPTION);
 // 	registerCoreInterrupt(30, &Interrupts::Core::int_security_error,			INTDPL::DPL0, INTTYPE::EXCEPTION);
 
+	for (size_t i = 0; i < 0x100; ++i) {
+		registerCoreInterrupt(i, IDT_STUB_TABLE[i], INTDPL::DPL0, INTTYPE::EXCEPTION);
+	}
+
 	uint8_t IDTP[10];
 	*reinterpret_cast<uint16_t*>(IDTP) = sizeof(IDT) - 1;
 	*reinterpret_cast<IDTDescriptor**>(IDTP + sizeof(uint16_t)) = IDT;
 
 	__asm__ volatile("lidt (%0)" :: "memory"(IDTP));
+
+	for (int i = 0; i < 0x20; ++i) {
+		ReserveKnownInterrupt(i);
+	}
 }
 
-void Interrupts::RegisterIRQ(unsigned int interruptVector, void (*handler)(void), unsigned int isTrap) {
-	registerCoreInterrupt(interruptVector, handler, INTDPL::DPL0, isTrap ? INTTYPE::TRAP : INTTYPE::EXCEPTION);
+void Interrupts::ForceIRQHandler(unsigned int interruptVector, void* handler) {
+	registerCoreInterrupt(
+		interruptVector,
+		reinterpret_cast<void(*)(void)>(handler),
+		INTDPL::DPL0,
+		INTTYPE::EXCEPTION
+	);
+}
+
+void Interrupts::ReleaseIRQ(unsigned int interruptVector) {
+	if (interruptVector < 0x100) {
+		registerCoreInterrupt(
+			interruptVector,
+			IDT_STUB_TABLE[interruptVector],
+			INTDPL::DPL0,
+			INTTYPE::EXCEPTION
+		);
+	}
+}
+
+void Interrupts::RegisterIRQ(unsigned int interruptVector, InterruptProvider* provider) {
+	ReserveKnownInterrupt(interruptVector);
+	registerProvider(interruptVector, provider);
+}
+
+int Interrupts::ReserveInterrupt() {
+	return ::ReserveInterrupt();
+}
+
+void Interrupts::ReleaseInterrupt(int i) {
+	::ReleaseInterrupt(i);
 }

@@ -472,6 +472,26 @@ void Loader::RemapGOP(
     PAT_enable = 0;
 
     BasicGFX.FBADDR = reinterpret_cast<uint32_t*>(ShdMem::Layout::EfiGopFramebuffer.start);
+
+    // map back buffer
+
+    if (EFI::sys->BootServices->AllocatePages(
+        AllocateAnyPages,
+        EfiUnusableMemory,
+        pages,
+        reinterpret_cast<EFI_PHYSICAL_ADDRESS*>(&current_src)
+    ) != EFI_SUCCESS) {
+        Loader::puts(u"Failed to allocate back buffer for framebuffer\n\r");
+        EFI::Terminate();
+    } 
+
+    ShdMem::VirtualAddress backbuffer_rva = ShdMem::ParseVirtualAddress(
+        ShdMem::Layout::ScreenBackBuffer.start
+    );
+
+    for (size_t i = 0; i < pages; ++i) {
+        IndirectRemap(pml4, backbuffer_rva, EfiUnusableMemory, current_src, 1, PI);
+    }
 }
 
 void Loader::MapPSFFont(PML4E* pml4, void*& pcf_font, size_t size, const PagingInformation& PI) {

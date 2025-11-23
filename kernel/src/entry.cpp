@@ -16,14 +16,22 @@
 #include <fs/VFS.hpp>
 
 #include <interrupts/APIC.hpp>
-#include <interrupts/idt.hpp>
+#include <interrupts/IDT.hpp>
+#include <interrupts/InterruptProvider.hpp>
 #include <interrupts/Panic.hpp>
+#include <interrupts/PIT.hpp>
 #include <interrupts/RuntimeSvc.hpp>
 
 #include <mm/gdt.hpp>
 #include <mm/Heap.hpp>
 #include <mm/PhysicalMemory.hpp>
 #include <mm/VirtualMemory.hpp>
+
+#include <pci/PCI.hpp>
+
+#include <sched/Dispatcher.hpp>
+#include <sched/TaskContext.hpp>
+#include <sched/TaskManager.hpp>
 
 #include <screen/Log.hpp>
 
@@ -113,21 +121,31 @@ namespace {
             return;
         }
 
-        Interrupts::RegisterIRQ(0x40, &Devices::PS2::PS2_IRQ1_Handler, false);
+        const int vector = Interrupts::ReserveInterrupt();
 
-        APIC::SetupIRQ(Devices::PS2::PS2_PORT1_ISA_IRQ_VECTOR, {
-            .InterruptVector = 0x40,
-            .Delivery = APIC::IRQDeliveryMode::FIXED,
-            .DestinationMode = APIC::IRQDestinationMode::Logical,
-            .Polarity = APIC::IRQPolarity::ACTIVE_HIGH,
-            .Trigger = APIC::IRQTrigger::EDGE,
-            .Masked = false,
-            .Destination = APIC::GetLAPICLogicalID()
-        });
+        if (vector < 0) {
+            Log::puts("[PS/2] Coult not reserve an interrupt for the keyboard\n\r");
+            Log::puts("[PS/2] No keyboard input will be provided\n\r");
+            return;
+        }
 
-        Log::puts("[PS/2] Keyboard IRQ configured\n\r");
-        Log::puts("[PS/2] Keyboard input enabled\n\r");
-        Log::puts("[PS/2] Initialization done\n\r");
+        // Interrupts::RegisterIRQ(vector, &Devices::PS2::PS2_IRQ1_Handler, false);
+
+        // APIC::SetupIRQ(Devices::PS2::PS2_PORT1_ISA_IRQ_VECTOR, {
+        //     .InterruptVector = static_cast<uint8_t>(vector),
+        //     .Delivery = APIC::IRQDeliveryMode::FIXED,
+        //     .DestinationMode = APIC::IRQDestinationMode::Logical,
+        //     .Polarity = APIC::IRQPolarity::ACTIVE_HIGH,
+        //     .Trigger = APIC::IRQTrigger::EDGE,
+        //     .Masked = false,
+        //     .Destination = APIC::GetLAPICLogicalID()
+        // });
+
+        // Log::puts("[PS/2] Keyboard IRQ configured\n\r");
+        // Log::puts("[PS/2] Keyboard input enabled\n\r");
+        // Log::puts("[PS/2] Initialization done\n\r");
+
+        Log::puts("[PS/2] Services configured but disabled\n\r");
     }
 }
 
@@ -135,6 +153,37 @@ Kernel::KernelExports Kernel::Exports = {
     .vfs = nullptr,
     .deviceInterface = nullptr
 };
+
+void f() {
+    static int i = 0;
+    while (true) {
+        Log::putsSafe("Task 1\n\r");
+        __asm__ volatile("hlt");
+    }
+}
+
+void g() {
+    static int i = 0;
+    while (true) {
+        Log::putsSafe("Task 2\n\r");
+        __asm__ volatile("hlt");
+    }
+}
+
+static Scheduling::TaskManager tman;
+
+static Interrupts::InterruptTrampoline apic_timer_handler(
+    [](void* stack, uint64_t error_code) {
+        static uint64_t i = 0;
+        i += 1;
+
+        APIC::SendEOI();
+
+        if (i % 1000 == 0) {
+            Log::printfSafe("APIC ticks: %llu\n\r", i);
+        }
+    }
+);
 
 LEGACY_EXPORT void KernelEntry() {
     __asm__ volatile("cli");
@@ -199,27 +248,64 @@ LEGACY_EXPORT void KernelEntry() {
 
     auto* keyboardBuffer = Devices::KeyboardDispatcher::Initialize(deviceInterface);
 
-    SetupPS2Keyboard(keyboardBuffer);
+    //SetupPS2Keyboard(keyboardBuffer);
+
+    auto context = Scheduling::KernelTaskContext::Create(reinterpret_cast<void*>(&f));
+    auto context2 = Scheduling::KernelTaskContext::Create(reinterpret_cast<void*>(&g));
+
+    if (!context.HasValue()) {
+        Panic::PanicShutdown("Could not create initial task context\n\r");
+    }
+    else if (!context2.HasValue()) {
+        Panic::PanicShutdown("Could not create second task context\n\r");
+    }
+
+    if (!tman.AddTask(context.GetValue())) {
+        Panic::PanicShutdown("Could not add initial task to task manager\n\r");
+    }
+    else if (!tman.AddTask(context2.GetValue())) {
+        Panic::PanicShutdown("Could not add second task to task manager\n\r");
+    }
+
+    PIT::Initialize();
+    PIT::Enable();
+
+    int apic_timer_vector = Interrupts::ReserveInterrupt();
+    if (apic_timer_vector < 0) {
+        Panic::PanicShutdown("Could not reserve interrupt for APIC timer\n\r");
+    }
+
+    APIC::Timer::MaskTimerLVT();
+    APIC::Timer::SetTimerDivideConfiguration(APIC::Timer::DivideConfiguration::BY_8);
+    APIC::Timer::SetTimerLVT(apic_timer_vector, APIC::Timer::Mode::PERIODIC);
+
+    //Log::puts("Initializing scheduler...\n\r");
+
+    //Scheduling::InitializeDispatcher(&tman);
 
     __asm__ volatile("sti");
 
-    // while (1) {
-    //     Devices::KeyboardDispatcher::BasicKeyPacket packet;
+    const uint64_t target = PIT::GetCountMillis() + 1;
+    APIC::Timer::SetTimerInitialCount(0xFFFFFFFF);
 
-    //     auto v = keyboardBuffer->Read(0, sizeof(packet), reinterpret_cast<uint8_t*>(&packet));
+    while (PIT::GetCountMillis() < target) {
+        __asm__ volatile("pause");
+    }
 
-    //     if (v.CheckError()) {
-    //         Log::puts("Error reading\n\r");
-    //     }
-    //     else {
-    //         if (v.GetValue() > 0) {
-    //             auto vpkt = Devices::KeyboardDispatcher::GetVirtualKeyPacket(packet);
-    //             Log::printf("Key: 0x%.2hhx, 0x%.2hhx, %s\n\r", vpkt.keypoint, vpkt.keycode, vpkt.flags != 0 ? "PRESSED" : "RELEASED");
-    //         }
-    //     }
-    // }
+    uint64_t end_count = APIC::Timer::GetTimerCurrentCount();
+    uint64_t ticks = 0xFFFFFFFF - end_count;
 
-    Services::Shell::Entry();
+    Log::puts("Reconfiguring APIC timer for 1ms intervals\n\r");
+    APIC::Timer::SetTimerInitialCount(static_cast<uint32_t>(ticks));
+
+    Interrupts::RegisterIRQ(apic_timer_vector, &apic_timer_handler);
+
+    PIT::Disable();
+    APIC::Timer::UnmaskTimerLVT();
+
+    //Services::Shell::Entry();
+
+    //PCI::Enumerate();
 
     while (1) {
         __asm__ volatile("hlt");

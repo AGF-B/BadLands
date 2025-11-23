@@ -263,6 +263,9 @@ namespace Devices::PS2 {
 			return StatusCode::FATAL_ERROR;
 		}
 		else if (scanCodeSet != SCAN_CODE_SET_1) {
+			Log::printf("[PS/2] Detected keyboard scan code set: %u\n\r", scanCodeSet);
+			Log::puts("[PS/2] Trying to set keyboard scan code set 1\n\r");
+
 			if (SetScanCodeSet(SCAN_CODE_SET_1) == FATAL_ERROR) {
 				Log::puts("[PS/2] Could not set keyboard scan code set\n\r");
 				return StatusCode::FATAL_ERROR;

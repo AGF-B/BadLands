@@ -16,7 +16,8 @@ namespace VirtualMemory {
     enum class StatusCode {
 		SUCCESS,
 		OUT_OF_MEMORY,
-		INVALID_PARAMETER
+		INVALID_PARAMETER,
+		INTERNAL_ERROR
 	};
 
     using PTE = Shared::Memory::PTE;
@@ -116,6 +117,7 @@ namespace VirtualMemory {
 	inline constexpr uint64_t NP_INDEX		= 0xFFFFFFFFFFFFE000;
 
 	StatusCode Setup();
+	void* DeriveNewFreshCR3();
 
 	void* AllocateDMA(uint64_t pages);
 	void* AllocateKernelHeap(uint64_t pages);
@@ -125,6 +127,8 @@ namespace VirtualMemory {
 	StatusCode FreeDMA(void* ptr, uint64_t pages);
 	StatusCode FreeKernelHeap(void* ptr, uint64_t pages);
 	StatusCode FreeUserPages(void* ptr, uint64_t pages);
+
+	StatusCode ChangeMappingFlags(void* _ptr, uint64_t flags, uint64_t pages = 1);
 
 	void* MapGeneralPages(void* pageAddress, size_t pages, uint64_t flags = 0);
 	StatusCode UnmapGeneralPages(void* vpage, size_t pages);

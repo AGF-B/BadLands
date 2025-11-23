@@ -13,6 +13,11 @@ namespace VirtualMemoryLayout {
         .limit = Shared::Memory::PML4E_COVERAGE - Shared::Memory::Layout::DMAZone.limit
     };
 
+    inline constexpr MemoryZone UserStack  {
+        .start = UserMemory.end() - 0x0000000000200000,
+        .limit = 0x0000000000200000
+    };
+
     inline constexpr MemoryZone PhysicalMemoryMap = {
         .start = Shared::Memory::Layout::UnmappedMemoryStart,
         .limit = 0x100000000
@@ -31,7 +36,7 @@ namespace VirtualMemoryLayout {
 
     inline constexpr MemoryZone KernelHeap = {
         .start = KernelHeapManagement.end(),
-        .limit = (Shared::Memory::PML4_ENTRIES / 2 - 4) * Shared::Memory::PML4E_COVERAGE
+        .limit = (Shared::Memory::PML4_ENTRIES / 2 - 5) * Shared::Memory::PML4E_COVERAGE
     };
 
     inline constexpr MemoryZone SecondaryRecursiveMapping = {
@@ -39,14 +44,24 @@ namespace VirtualMemoryLayout {
         .limit = Shared::Memory::PML4E_COVERAGE
     };
 
-    inline constexpr MemoryZone MainCoreDump = {
-        .start = 0xFFFFFF8001000000,
-        .limit = 0x0000000000008000
+    inline constexpr MemoryZone TaskMemory {
+        .start = Shared::Memory::Layout::RecursiveMemoryMapping.end(),
+        .limit = Shared::Memory::PML4E_COVERAGE
+    };
+    
+    inline constexpr MemoryZone KernelStackGuard = {
+        .start = TaskMemory.start,
+        .limit = Shared::Memory::PAGE_SIZE
     };
 
-    inline constexpr MemoryZone SecondaryCoreDump = {
-        .start = 0xFFFFFF8001008000,
-        .limit = 0x0000000000008000
+    inline constexpr MemoryZone KernelStack = {
+        .start = KernelStackGuard.end(),
+        .limit = 0x0000000000100000 - 2 * Shared::Memory::PAGE_SIZE
+    };
+
+    inline constexpr MemoryZone KernelStackReserve = {
+        .start = KernelStack.end(),
+        .limit = Shared::Memory::PAGE_SIZE
     };
 
     inline constexpr MemoryZone UserVMemManagement = {
