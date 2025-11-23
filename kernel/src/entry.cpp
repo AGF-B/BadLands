@@ -285,7 +285,9 @@ LEGACY_EXPORT void KernelEntry() {
 
     __asm__ volatile("sti");
 
-    const uint64_t target = PIT::GetCountMillis() + 1;
+    static constexpr uint64_t config_granularity_ms = 19;
+
+    const uint64_t target = PIT::GetCountMillis() + config_granularity_ms;
     APIC::Timer::SetTimerInitialCount(0xFFFFFFFF);
 
     while (PIT::GetCountMillis() < target) {
@@ -293,7 +295,7 @@ LEGACY_EXPORT void KernelEntry() {
     }
 
     uint64_t end_count = APIC::Timer::GetTimerCurrentCount();
-    uint64_t ticks = 0xFFFFFFFF - end_count;
+    uint64_t ticks = (0xFFFFFFFF - end_count) / config_granularity_ms;
 
     Log::puts("Reconfiguring APIC timer for 1ms intervals\n\r");
     APIC::Timer::SetTimerInitialCount(static_cast<uint32_t>(ticks));
