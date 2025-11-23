@@ -3,7 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 
-#include <atomic>
+#include <shared/SimpleAtomic.hpp>
 
 #include <fs/Status.hpp>
 
@@ -51,7 +51,7 @@ namespace FS {
         Owner* const owner;
 
     private:
-        std::atomic<size_t> openReferences{0};
+        Utils::SimpleAtomic<size_t> openReferences{0};
         bool removed{false};
     };
 

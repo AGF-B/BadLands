@@ -1,28 +1,6 @@
 #pragma once
 
-template<class ErrT, typename V>
-class Response {
-public:
-    explicit inline Response(ErrT error) : isError{true}, error{error} {}
-    explicit inline Response(V value) : isError{false}, value{value} {}
-
-    inline bool CheckError() const {
-        return isError;
-    }
-
-    inline ErrT GetError() const {
-        return error;
-    }
-
-    inline V GetValue() const {
-        return value;
-    }
-
-private:
-    bool isError;
-    [[maybe_unused]] ErrT error;
-    [[maybe_unused]] V value;
-};
+#include <shared/Response.hpp>
 
 namespace FS {
     enum class Status {

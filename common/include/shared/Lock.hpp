@@ -1,6 +1,6 @@
 #pragma once
 
-#include <atomic>
+#include <shared/SimpleAtomic.hpp>
 
 namespace Utils {
     class Lock{
@@ -9,10 +9,10 @@ namespace Utils {
             bool desired = true;
             bool expected = false;
 
-            while (!pvt_lock.compare_exchange_strong(
+            while (!pvt_lock.compare_exchange(
                 expected,
                 desired
-            ));
+            )) { expected = false; }
         }
 
         inline void unlock() noexcept {
@@ -28,6 +28,6 @@ namespace Utils {
         }
 
     private:
-        std::atomic<bool> pvt_lock{false};
+        SimpleAtomic<bool> pvt_lock{false};
     };
 }
