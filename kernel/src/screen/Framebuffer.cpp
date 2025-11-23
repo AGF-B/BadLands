@@ -99,19 +99,6 @@ namespace Framebuffer {
                 : "memory"
             );
         }
-
-        __asm__ volatile("lfence");
-        __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi));
-        // uint64_t end_tsc = ((static_cast<uint64_t>(hi) << 32) | lo);
-        // volatile uint64_t tsc_diff = end_tsc - begin_tsc;
-        // uint64_t pixels_count = static_cast<uint64_t>(info.XResolution) * static_cast<uint64_t>(info.YResolution);
-        // Log::printfSafe("Framebuffer Flush: %llu pixels in %llu TSC (%llu TSC/pixel)",
-        //     pixels_count,
-        //     tsc_diff,
-        //     tsc_diff / pixels_count
-        // );
-
-        // __asm__ volatile("jmp .");
     }
 
     void Scroll(uint64_t dy) {
