@@ -82,11 +82,6 @@ namespace Framebuffer {
     }
 
     void Flush() {
-        uint32_t lo, hi;
-        __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi));
-        uint64_t begin_tsc = ((static_cast<uint64_t>(hi) << 32) | lo);
-        __asm__ volatile("lfence");
-
         for (size_t y = 0; y < info.YResolution; ++y) {
             uint32_t* dest_row = &address[y * info.PixelsPerScanLine];
             uint32_t* src_row  = &back[((y + y_disp) % info.YResolution) * info.PixelsPerScanLine];
