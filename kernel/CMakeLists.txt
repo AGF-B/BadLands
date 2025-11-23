@@ -6,11 +6,12 @@ set(CMAKE_ASM_NASM_OBJECT_FORMAT win64)
 enable_language(ASM_NASM)
 
 add_library(KERNEL_IMG_ASM STATIC
+    "../common/src/shared/AtomicImpl.asm"
     "src/devices/PS2/Controller.asm"
     "src/devices/PS2/Keyboard_IRQ.asm"
-    "src/interrupts/core/page_error.asm"
-    "src/interrupts/CoreDumpSetup.asm"
+    "src/interrupts/IDTCore.asm"
     "src/interrupts/PIC.asm"
+    "src/sched/SchedulerIRQ.asm"
     "src/mm/gdt.asm"
 )
 
@@ -29,22 +30,33 @@ add_executable(KERNEL_IMG
     "src/devices/PS2/Keyboard.cpp"
     "src/devices/PS2/KeyboardEvent.cpp"
     "src/devices/PS2/Keypoints.cpp"
+    "src/devices/USB/xHCI/Controller.cpp"
+    "src/devices/USB/xHCI/TRB.cpp"
     "src/fs/IFNode.cpp"
     "src/fs/NPFS.cpp"
     "src/fs/VFS.cpp"
     "src/interrupts/core/PageFault.cpp"
     "src/interrupts/APIC.cpp"
     "src/interrupts/CoreDump.cpp"
-    "src/interrupts/idt.cpp"
+    "src/interrupts/IDT.cpp"
+    "src/interrupts/InterruptProvider.cpp"
     "src/interrupts/Panic.cpp"
+    "src/interrupts/PIT.cpp"
     "src/interrupts/RuntimeSvc.cpp"
     "src/mm/Heap.cpp"
     "src/mm/PhysicalMemory.cpp"
     "src/mm/Utils.cpp"
     "src/mm/VirtualMemory.cpp"
+    "src/pci/MSI.cpp"
+    "src/pci/PCI.cpp"
+    "src/pci/Interface.cpp"
+    "src/sched/Dispatcher.cpp"
+    "src/sched/TaskContext.cpp"
+    "src/sched/TaskManager.cpp"
     "src/screen/Format.cpp"
     "src/screen/Framebuffer.cpp"
     "src/screen/Log.cpp"
+    "src/screen/ThreadSafe.cpp"
     "src/entry.cpp"
 )
 
@@ -74,6 +86,7 @@ target_compile_options(KERNEL_IMG PRIVATE
     -fno-exceptions
     -fno-rtti
     -flto
+    -fno-stack-protector
 )
 target_compile_options(KERNEL_IMG_C PRIVATE
     -mabi=ms
@@ -92,6 +105,7 @@ target_compile_options(KERNEL_IMG_C PRIVATE
     -fno-exceptions
     -flto
     -std=c2x
+    -fno-stack-protector
 )
 target_compile_options(KERNEL_SVC PRIVATE
     -mabi=ms
@@ -110,13 +124,14 @@ target_compile_options(KERNEL_SVC PRIVATE
     -fno-exceptions
     -fno-rtti
     -flto
+    -fno-stack-protector
 )
 
 target_link_options(KERNEL_IMG PRIVATE
     -Wl,-e,KernelEntry
     -Wl,-T,../../kernel/linker.ld
     -Wl,--build-id=none
-    -s
+    #-s
     -z noexecstack
     -nolibc
     -nostdlib
@@ -124,7 +139,7 @@ target_link_options(KERNEL_IMG PRIVATE
 )
 target_link_options(KERNEL_IMG_C PRIVATE
     -Wl,--build-id=none
-    -s
+    #-s
     -z noexecstack
     -nolibc
     -nostdlib
@@ -132,7 +147,7 @@ target_link_options(KERNEL_IMG_C PRIVATE
 )
 target_link_options(KERNEL_SVC PRIVATE
     -Wl,--build-id=none
-    -s
+    #-s
     -z noexecstack
     -nolibc
     -nostdlib
