@@ -7,7 +7,7 @@
 #include <devices/USB/xHCI/TRB.hpp>
 
 #include <interrupts/APIC.hpp>
-#include <interrupts/idt.hpp>
+#include <interrupts/IDT.hpp>
 #include <interrupts/Panic.hpp>
 #include <interrupts/PIT.hpp>
 
