@@ -9,6 +9,7 @@ namespace Scheduling {
         void* StackPointer;
 
         static TaskContext Create(void* InstructionPointer);
+        void Destroy();
     };
 
     struct KernelTaskContext : public TaskContext {

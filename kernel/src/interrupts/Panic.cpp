@@ -7,6 +7,8 @@
 #include <interrupts/Panic.hpp>
 #include <interrupts/RuntimeSvc.hpp>
 
+#include <sched/Self.hpp>
+
 #include <screen/Log.hpp>
 
 namespace {
@@ -41,10 +43,7 @@ namespace Panic {
             Log::puts("\n\r");
         }
 
-        __asm__ volatile("cli");
-        while (1) {
-            __asm__ volatile("hlt");
-        }
+        Self::ForceHalt();
     }
 
 	[[noreturn]] void Panic(void* panic_stack, const char* msg, uint64_t errv) {
@@ -58,10 +57,7 @@ namespace Panic {
 
 		Panic::DumpCore(panic_stack, errv);
 
-		__asm__ volatile("cli");
-		while (1) {
-			__asm__ volatile("hlt");
-		}
+		Self::ForceHalt();
 	}
 
 

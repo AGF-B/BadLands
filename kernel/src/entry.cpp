@@ -268,42 +268,16 @@ LEGACY_EXPORT void KernelEntry() {
     }
 
     PIT::Initialize();
-    PIT::Enable();
 
-    int apic_timer_vector = Interrupts::ReserveInterrupt();
-    if (apic_timer_vector < 0) {
-        Panic::PanicShutdown("Could not reserve interrupt for APIC timer\n\r");
-    }
-
-    APIC::Timer::MaskTimerLVT();
-    APIC::Timer::SetTimerDivideConfiguration(APIC::Timer::DivideConfiguration::BY_8);
-    APIC::Timer::SetTimerLVT(apic_timer_vector, APIC::Timer::Mode::PERIODIC);
+    /// TODO: make the APIC::Initialize method create the list of processors in Self
+    /// TODO: add tasks to current processor
+    /// TODO: modify dispatcher to use APIC timer and Self to do task switch
 
     //Log::puts("Initializing scheduler...\n\r");
 
     //Scheduling::InitializeDispatcher(&tman);
 
     __asm__ volatile("sti");
-
-    static constexpr uint64_t config_granularity_ms = 19;
-
-    const uint64_t target = PIT::GetCountMillis() + config_granularity_ms;
-    APIC::Timer::SetTimerInitialCount(0xFFFFFFFF);
-
-    while (PIT::GetCountMillis() < target) {
-        __asm__ volatile("pause");
-    }
-
-    uint64_t end_count = APIC::Timer::GetTimerCurrentCount();
-    uint64_t ticks = (0xFFFFFFFF - end_count) / config_granularity_ms;
-
-    Log::puts("Reconfiguring APIC timer for 1ms intervals\n\r");
-    APIC::Timer::SetTimerInitialCount(static_cast<uint32_t>(ticks));
-
-    Interrupts::RegisterIRQ(apic_timer_vector, &apic_timer_handler);
-
-    PIT::Disable();
-    APIC::Timer::UnmaskTimerLVT();
 
     //Services::Shell::Entry();
 

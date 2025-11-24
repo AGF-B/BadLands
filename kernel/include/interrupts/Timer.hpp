@@ -15,5 +15,5 @@ class Timer {
     virtual void SendEOI() const = 0;
     virtual void SetHandler(void (*handler)()) = 0;
     virtual uint64_t GetCountMicros() const = 0;
-    virtual uint64_t GetcountMillis() const = 0;
+    virtual uint64_t GetCountMillis() const = 0;
 };

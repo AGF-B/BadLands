@@ -1,5 +1,9 @@
 #include <cstdint>
 
+#include <shared/Lock.hpp>
+#include <shared/LockGuard.hpp>
+#include <shared/SimpleAtomic.hpp>
+
 #include <interrupts/APIC.hpp>
 #include <interrupts/IDT.hpp>
 #include <interrupts/InterruptProvider.hpp>
@@ -45,6 +49,8 @@ namespace {
 
     static int vector = -1;
     static bool enabled = false;
+    static Utils::Lock enable_lock;
+    static Utils::SimpleAtomic<uint64_t> users{0};
     static void (*pit_handler)() = nullptr;
     static volatile uint64_t millis_counter = 0;
 
@@ -90,13 +96,19 @@ namespace PIT {
     }
 
     void Enable() {
+        ++users;
+        Utils::LockGuard _{enable_lock};
         APIC::UnmaskIRQ(ISA_IRQ_PORT);
         enabled = true;
     }
 
     void Disable() {
-        APIC::MaskIRQ(ISA_IRQ_PORT);
-        enabled = false;
+        Utils::LockGuard _{enable_lock};
+        
+        if (--users == 0) {
+            APIC::MaskIRQ(ISA_IRQ_PORT);
+            enabled = false;
+        }
     }
 
     void ReattachIRQ(void (*handler)()) {

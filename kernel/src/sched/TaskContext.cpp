@@ -2,6 +2,8 @@
 
 #include <shared/memory/defs.hpp>
 
+#include <interrupts/Panic.hpp>
+
 #include <mm/Heap.hpp>
 #include <mm/VirtualMemory.hpp>
 #include <mm/VirtualMemoryLayout.hpp>
@@ -14,6 +16,10 @@ namespace Scheduling {
             .InstructionPointer = InstructionPointer,
             .StackPointer = nullptr
         };
+    }
+
+    void TaskContext::Destroy() {
+        Panic::PanicShutdown("TASK DESTRUCTION NOT IMPLEMENTED YET\n\r");
     }
 
     void* KernelTaskContext::SetupTaskPages() {

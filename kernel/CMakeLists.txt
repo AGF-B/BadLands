@@ -51,6 +51,7 @@ add_executable(KERNEL_IMG
     "src/pci/PCI.cpp"
     "src/pci/Interface.cpp"
     "src/sched/Dispatcher.cpp"
+    "src/sched/Self.cpp"
     "src/sched/TaskContext.cpp"
     "src/sched/TaskManager.cpp"
     "src/screen/Format.cpp"

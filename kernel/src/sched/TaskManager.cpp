@@ -10,9 +10,32 @@ namespace Scheduling {
         return task_count;
     }
 
-    bool TaskManager::AddTask(const TaskContext& context) {
+    TaskManager::Task* TaskManager::FindTask(uint64_t task_id) const {
+        auto* ptr = head;
+        auto* const loop_ref = ptr;
+
+        if (ptr != nullptr) {
+            if (ptr->id == task_id) {
+                return ptr;
+            }
+
+            ptr = ptr->next;
+
+            while (ptr != loop_ref && ptr->id != task_id) {
+                ptr = ptr->next;
+            }
+
+            if (ptr != loop_ref) {
+                return ptr;
+            }
+        }
+
+        return nullptr;
+    }
+
+    uint64_t TaskManager::AddTask(const TaskContext& context) {        
         if (context.CR3 == nullptr || context.InstructionPointer == nullptr || context.StackPointer == nullptr) {
-            return false;
+            return 0;
         }
         
         Task* new_task = static_cast<Task*>(
@@ -20,10 +43,13 @@ namespace Scheduling {
         );
 
         if (new_task == nullptr) {
-            return false;
+            return 0;
         }
 
-        new_task->id = task_count++;
+        Utils::LockGuard _{modify_lock};
+
+        new_task->blocked = false;
+        new_task->id = ++task_count; // id = number of tasks added since reset
         new_task->context = context;
 
         if (head == nullptr) {
@@ -40,15 +66,58 @@ namespace Scheduling {
             head->prev = new_task;
         }
 
-        return true;
+        return new_task->id;
+    }
+
+    void TaskManager::RemoveTask(uint64_t task_id) {
+        Utils::LockGuard _{modify_lock};
+
+        auto* task = FindTask(task_id);
+
+        // refuse to delete task if it is the only one left
+        if (!(task == head && task->next == task)) {
+            if (head == task) {
+                head = task->next;
+            }
+
+            task->prev = task->next;
+            task->context.Destroy();
+            Heap::Free(task);
+        }
+    }
+
+    void TaskManager::BlockTask(uint64_t task_id) const {
+        Utils::LockGuard _{modify_lock};
+
+        auto* task = FindTask(task_id);
+
+        if (task != nullptr) {
+            task->blocked = true;
+        }
+    }
+
+    void TaskManager::UnblockTask(uint64_t task_id) const {
+        Utils::LockGuard _{modify_lock};
+        
+        auto* task = FindTask(task_id);
+
+        if (task != nullptr) {
+            task->blocked = false;
+        }
     }
 
     TaskContext* TaskManager::TaskSwitch(void* stack_context) {
         if (head == nullptr) {
             return nullptr;
         }
+        else if (!modify_lock.trylock()) {
+            return nullptr; // if can't change task, stay in current task
+        }
 
         auto* next = head->next;
+        head = next;
+
+        modify_lock.unlock();
 
         if (last != nullptr) {
             head->context.StackPointer = stack_context;
@@ -59,7 +128,6 @@ namespace Scheduling {
         }
 
         last = next;
-        head = next;
         return &head->context;
     }
 }
