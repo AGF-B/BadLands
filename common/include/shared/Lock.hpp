@@ -5,14 +5,19 @@
 namespace Utils {
     class Lock{
     public:
-        inline void lock() noexcept {
-            bool desired = true;
+        inline bool trylock() noexcept {
+            static constexpr bool desired = true;
             bool expected = false;
 
-            while (!pvt_lock.compare_exchange(
-                expected,
-                desired
-            )) { expected = false; }
+            if (!pvt_lock.compare_exchange(expected, desired)) {
+                return false;
+            }
+
+            return true;
+        }
+
+        inline void lock() noexcept {
+            while (!trylock());
         }
 
         inline void unlock() noexcept {
