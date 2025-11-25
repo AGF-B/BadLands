@@ -30,6 +30,7 @@
 #include <pci/PCI.hpp>
 
 #include <sched/Dispatcher.hpp>
+#include <sched/Self.hpp>
 #include <sched/TaskContext.hpp>
 #include <sched/TaskManager.hpp>
 
@@ -154,23 +155,24 @@ Kernel::KernelExports Kernel::Exports = {
     .deviceInterface = nullptr
 };
 
+static int tid_g = 0;
+
 void f() {
     static int i = 0;
     while (true) {
         Log::putsSafe("Task 1\n\r");
-        __asm__ volatile("hlt");
+        ++i;
+        if (i == 2000000000) {
+            Self::Get().RemoveTask(tid_g);
+        }
     }
 }
 
 void g() {
-    static int i = 0;
     while (true) {
         Log::putsSafe("Task 2\n\r");
-        __asm__ volatile("hlt");
     }
 }
-
-static Scheduling::TaskManager tman;
 
 static Interrupts::InterruptTrampoline apic_timer_handler(
     [](void* stack, uint64_t error_code) {
@@ -250,28 +252,27 @@ LEGACY_EXPORT void KernelEntry() {
 
     //SetupPS2Keyboard(keyboardBuffer);
 
-    auto context = Scheduling::KernelTaskContext::Create(reinterpret_cast<void*>(&f));
-    auto context2 = Scheduling::KernelTaskContext::Create(reinterpret_cast<void*>(&g));
-
-    if (!context.HasValue()) {
-        Panic::PanicShutdown("Could not create initial task context\n\r");
-    }
-    else if (!context2.HasValue()) {
-        Panic::PanicShutdown("Could not create second task context\n\r");
-    }
-
-    if (!tman.AddTask(context.GetValue())) {
-        Panic::PanicShutdown("Could not add initial task to task manager\n\r");
-    }
-    else if (!tman.AddTask(context2.GetValue())) {
-        Panic::PanicShutdown("Could not add second task to task manager\n\r");
-    }
-
     PIT::Initialize();
 
     /// TODO: make the APIC::Initialize method create the list of processors in Self
-    /// TODO: add tasks to current processor
-    /// TODO: modify dispatcher to use APIC timer and Self to do task switch
+    auto taskF = Scheduling::KernelTaskContext::Create(&f);
+    if (!taskF.HasValue()) {
+        Panic::PanicShutdown("COULD NOT CREATE TASK 1");
+    }
+
+    auto tf = taskF.GetValue();
+
+    Self::Get().AddTask(tf);
+
+    auto taskG = Scheduling::KernelTaskContext::Create(&g);
+    if (!taskG.HasValue()) {
+        Panic::PanicShutdown("COULD NOT CREATE TASK 2");
+    }
+
+    auto tg = taskG.GetValue();
+
+    Self::Get().AddTask(tg);
+    
 
     //Log::puts("Initializing scheduler...\n\r");
 

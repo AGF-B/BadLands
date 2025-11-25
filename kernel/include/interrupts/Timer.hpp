@@ -5,6 +5,7 @@
 #include <interrupts/InterruptProvider.hpp>
 
 class Timer {
+public:
     virtual void Initialize() = 0;
     virtual bool IsEnabled() const = 0;
     virtual void Enable() = 0;

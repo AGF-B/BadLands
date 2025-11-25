@@ -230,3 +230,8 @@ void Self::BlockTask(uint64_t task_id) {
 void Self::UnblockTask(uint64_t task_id) {
     task_manager.UnblockTask(task_id);
 }
+
+Scheduling::TaskContext* Self::TaskSwitch(void* stack_context) {
+    return task_manager.TaskSwitch(stack_context);
+}
+

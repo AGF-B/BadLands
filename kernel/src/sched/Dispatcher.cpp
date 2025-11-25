@@ -1,6 +1,5 @@
-#include <interrupts/PIT.hpp>
+#include <sched/Self.hpp>
 
-#include <sched/TaskManager.hpp>
 #include <sched/Dispatcher.hpp>
 
 namespace Scheduling {
@@ -9,27 +8,24 @@ namespace Scheduling {
         void* RSP;
     };
 
-    // for MP: have per-CPU processor structures that point to their respective task managers
-    // and dispatch to correct manager here
-    static TaskManager* taskManager = nullptr;
-
     extern "C" void SCHEDULER_IRQ_HANDLER();
 
-    void InitializeDispatcher(TaskManager* manager) {
-        taskManager = manager;
-        PIT::ReattachIRQ(&SCHEDULER_IRQ_HANDLER);
+    void InitializeDispatcher() {
+        Self::Get().GetTimer().ReattachIRQ(&SCHEDULER_IRQ_HANDLER);
     }
 
     extern "C" void SCHEDULER_IRQ_DISPATCHER(SwitchResult* result, void* stack_context) {
         if (result != nullptr) {
             result->CR3 = nullptr;
             result->RSP = nullptr;
+            
+            auto& self = Self::Get();
 
-            PIT::SignalIRQ();
-            PIT::SendEOI();
+            self.GetTimer().SignalIRQ();
+            self.GetTimer().SendEOI();
 
-            if (PIT::GetCountMicros() % 1000 == 0) {
-                auto* task = taskManager->TaskSwitch(stack_context);
+            if (self.GetTimer().GetCountMillis() % 10 == 0) {
+                auto* task = self.TaskSwitch(stack_context);
 
                 if (task != nullptr) {
                     result->CR3 = task->CR3;

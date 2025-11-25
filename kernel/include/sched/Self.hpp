@@ -72,6 +72,5 @@ public:
     void RemoveTask(uint64_t task_id);
     void BlockTask(uint64_t task_id);
     void UnblockTask(uint64_t task_id);
-
-    
+    Scheduling::TaskContext* TaskSwitch(void* stack_context);
 };
