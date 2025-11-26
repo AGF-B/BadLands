@@ -11,7 +11,7 @@ namespace Scheduling {
     extern "C" void SCHEDULER_IRQ_HANDLER();
 
     void InitializeDispatcher() {
-        Self::Get().GetTimer().ReattachIRQ(&SCHEDULER_IRQ_HANDLER);
+        Self().GetTimer().ReattachIRQ(&SCHEDULER_IRQ_HANDLER);
     }
 
     extern "C" void SCHEDULER_IRQ_DISPATCHER(SwitchResult* result, void* stack_context) {
@@ -19,13 +19,14 @@ namespace Scheduling {
             result->CR3 = nullptr;
             result->RSP = nullptr;
             
-            auto& self = Self::Get();
+            auto& self = Self();
+            auto& timer = self.GetTimer();
 
-            self.GetTimer().SignalIRQ();
-            self.GetTimer().SendEOI();
+            timer.SignalIRQ();
+            timer.SendEOI();
 
-            if (self.GetTimer().GetCountMillis() % 10 == 0) {
-                auto* task = self.TaskSwitch(stack_context);
+            if (timer.GetCountMillis() % 10 == 0) {
+                auto* task = self.GetTaskManager().TaskSwitch(stack_context);
 
                 if (task != nullptr) {
                     result->CR3 = task->CR3;

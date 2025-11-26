@@ -59,13 +59,13 @@ namespace {
     } PITWrapper;
 }
 
-Self::APICTimerWrapper::TimerProvider::TimerProvider(APICTimerWrapper* timer_wrapper) : timer_wrapper{timer_wrapper} {}
+UnattachedSelf::APICTimerWrapper::TimerProvider::TimerProvider(APICTimerWrapper* timer_wrapper) : timer_wrapper{timer_wrapper} {}
 
-void Self::APICTimerWrapper::TimerProvider::HandleIRQ(void*,uint64_t) {
+void UnattachedSelf::APICTimerWrapper::TimerProvider::HandleIRQ(void*,uint64_t) {
     timer_wrapper->InternalHandler();
 }
 
-void Self::APICTimerWrapper::InternalHandler() {
+void UnattachedSelf::APICTimerWrapper::InternalHandler() {
     SignalIRQ();
 
     if (handler != nullptr) {
@@ -75,7 +75,7 @@ void Self::APICTimerWrapper::InternalHandler() {
     SendEOI();
 }
 
-void Self::APICTimerWrapper::Initialize() {
+void UnattachedSelf::APICTimerWrapper::Initialize() {
     static constexpr uint32_t TIMER_INITIAL_COUNT = 0xFFFFFFFF;
     static constexpr uint64_t CONFIG_GRANULARITY_MS = 19;
 
@@ -112,57 +112,57 @@ void Self::APICTimerWrapper::Initialize() {
     Log::printfSafe("[CPU %u] Configured APIC timer for 1ms intervals\n\r", APIC::GetLAPICID());
 }
 
-bool Self::APICTimerWrapper::IsEnabled() const {
+bool UnattachedSelf::APICTimerWrapper::IsEnabled() const {
     return enabled;
 }
 
-void Self::APICTimerWrapper::Enable() {
+void UnattachedSelf::APICTimerWrapper::Enable() {
     APIC::Timer::UnmaskTimerLVT();
     enabled = true;
 }
 
-void Self::APICTimerWrapper::Disable() {
+void UnattachedSelf::APICTimerWrapper::Disable() {
     APIC::Timer::MaskTimerLVT();
     enabled = false;
 }
 
-void Self::APICTimerWrapper::ReattachIRQ(void (*handler)()) {
+void UnattachedSelf::APICTimerWrapper::ReattachIRQ(void (*handler)()) {
     if (vector != 0) {
         Interrupts::ForceIRQHandler(vector, reinterpret_cast<void*>(handler));
     }
 }
 
-void Self::APICTimerWrapper::ReleaseIRQ() {
+void UnattachedSelf::APICTimerWrapper::ReleaseIRQ() {
     if (vector != 0) {
         Interrupts::ReleaseIRQ(vector);
     }
 }
 
-void Self::APICTimerWrapper::SignalIRQ() {
+void UnattachedSelf::APICTimerWrapper::SignalIRQ() {
     millis_counter += MILLIS_INTERVAL;
 }
 
-void Self::APICTimerWrapper::SendEOI() const {
+void UnattachedSelf::APICTimerWrapper::SendEOI() const {
     APIC::SendEOI();
 }
 
-void Self::APICTimerWrapper::SetHandler(void (*handler)()) {
+void UnattachedSelf::APICTimerWrapper::SetHandler(void (*handler)()) {
     this->handler = handler;
 }
 
-uint64_t Self::APICTimerWrapper::GetCountMicros() const {
+uint64_t UnattachedSelf::APICTimerWrapper::GetCountMicros() const {
     return millis_counter * 1000;
 }
 
-uint64_t Self::APICTimerWrapper::GetCountMillis() const {
+uint64_t UnattachedSelf::APICTimerWrapper::GetCountMillis() const {
     return millis_counter;
 }
 
-Self::Self(uint8_t apic_id, uint8_t apic_uid, bool enabled, bool online_capable)
+UnattachedSelf::UnattachedSelf(uint8_t apic_id, uint8_t apic_uid, bool enabled, bool online_capable)
     : enabled(enabled), online_capable(online_capable), apic_id(apic_id), apic_uid(apic_uid) {
 }
 
-Self& Self::Get() {
+UnattachedSelf& UnattachedSelf::Attach() {
     uint8_t apic_id = APIC::GetLAPICID();
 
     for (size_t i = 0; i < processor_count; i++) {
@@ -174,15 +174,15 @@ Self& Self::Get() {
     Panic::Panic("COULD NOT FIND OWN PROCESSOR\n\r");
 }
 
-bool Self::IsEnabled() const {
+bool UnattachedSelf::IsEnabled() const {
     return enabled;
 }
 
-bool Self::IsOnlineCapable() const {
+bool UnattachedSelf::IsOnlineCapable() const {
     return online_capable;
 }
 
-void Self::Reset() {
+void UnattachedSelf::Reset() {
     if (enabled) {
         // TODO: release all memory
     }
@@ -196,42 +196,29 @@ void Self::Reset() {
     Panic::Panic("COULD NOT RESET PROCESSOR\n\r");
 }
 
-void Self::ForceHaltRemote() {
+void UnattachedSelf::ForceHaltRemote() {
     Panic::Panic("REMOTE FORCE HALT NOT IMPLEMENTED\n\r");
 }
 
-[[noreturn]] void Self::ForceHalt() {
+[[noreturn]] void UnattachedSelf::ForceHalt() {
     __asm__ volatile("cli");
     while (true) {
         __asm__ volatile("hlt");
     }
 }
 
-Timer& Self::GetPIT() {
+Timer& UnattachedSelf::GetPIT() {
     return PITWrapper;
 }
 
-Timer& Self::GetTimer() {
+Timer& UnattachedSelf::GetTimer() {
     return local_timer;
 }
 
-void Self::AddTask(Scheduling::TaskContext& context) {
-    task_manager.AddTask(context);
+Scheduling::TaskManager& UnattachedSelf::GetTaskManager() {
+    return task_manager;
 }
 
-void Self::RemoveTask(uint64_t task_id) {
-    task_manager.RemoveTask(task_id);
+UnattachedSelf& Self() {
+    return UnattachedSelf::Attach();
 }
-
-void Self::BlockTask(uint64_t task_id) {
-    task_manager.BlockTask(task_id);
-}
-
-void Self::UnblockTask(uint64_t task_id) {
-    task_manager.UnblockTask(task_id);
-}
-
-Scheduling::TaskContext* Self::TaskSwitch(void* stack_context) {
-    return task_manager.TaskSwitch(stack_context);
-}
-

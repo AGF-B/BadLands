@@ -1,11 +1,13 @@
 #pragma once
 
+#include <cstddef>
+
 #include <interrupts/Timer.hpp>
 
 #include <sched/TaskContext.hpp>
 #include <sched/TaskManager.hpp>
 
-class Self {
+class UnattachedSelf {
 private:
     class APICTimerWrapper : public Timer {
     private:
@@ -42,7 +44,7 @@ private:
         uint64_t GetCountMillis() const final;
     };
 
-    static inline Self* processors;
+    static inline UnattachedSelf* processors;
     static inline size_t processor_count;
 
     bool enabled{false};
@@ -55,9 +57,9 @@ private:
     Scheduling::TaskManager task_manager;
 
 public:
-    Self(uint8_t apic_id, uint8_t apic_uid, bool enabled, bool online_capable);
+    UnattachedSelf(uint8_t apic_id, uint8_t apic_uid, bool enabled, bool online_capable);
 
-    static Self& Get();
+    static UnattachedSelf& Attach();
 
     bool IsEnabled() const;
     bool IsOnlineCapable() const;
@@ -67,10 +69,8 @@ public:
 
     Timer& GetPIT();
     Timer& GetTimer();
-    
-    void AddTask(Scheduling::TaskContext& context);
-    void RemoveTask(uint64_t task_id);
-    void BlockTask(uint64_t task_id);
-    void UnblockTask(uint64_t task_id);
-    Scheduling::TaskContext* TaskSwitch(void* stack_context);
+
+    Scheduling::TaskManager& GetTaskManager();
 };
+
+UnattachedSelf& Self();

@@ -43,7 +43,7 @@ namespace Panic {
             Log::puts("\n\r");
         }
 
-        Self::ForceHalt();
+        UnattachedSelf::ForceHalt();
     }
 
 	[[noreturn]] void Panic(void* panic_stack, const char* msg, uint64_t errv) {
@@ -57,7 +57,7 @@ namespace Panic {
 
 		Panic::DumpCore(panic_stack, errv);
 
-		Self::ForceHalt();
+		UnattachedSelf::ForceHalt();
 	}
 
 

@@ -163,7 +163,7 @@ void f() {
         Log::putsSafe("Task 1\n\r");
         ++i;
         if (i == 2000000000) {
-            Self::Get().RemoveTask(tid_g);
+            Self().GetTaskManager().RemoveTask(tid_g);
         }
     }
 }
@@ -254,24 +254,27 @@ LEGACY_EXPORT void KernelEntry() {
 
     PIT::Initialize();
 
-    /// TODO: make the APIC::Initialize method create the list of processors in Self
-    auto taskF = Scheduling::KernelTaskContext::Create(&f);
+    /// TODO: make the APIC::Initialize method create the list of processors in Self    
+    auto taskF = Scheduling::KernelTaskContext::Create(reinterpret_cast<void*>(&f));
     if (!taskF.HasValue()) {
         Panic::PanicShutdown("COULD NOT CREATE TASK 1");
     }
 
+    auto& self = Self();
+    auto& tman = self.GetTaskManager();
+
     auto tf = taskF.GetValue();
 
-    Self::Get().AddTask(tf);
+    tman.AddTask(tf);
 
-    auto taskG = Scheduling::KernelTaskContext::Create(&g);
+    auto taskG = Scheduling::KernelTaskContext::Create(reinterpret_cast<void*>(&g));
     if (!taskG.HasValue()) {
         Panic::PanicShutdown("COULD NOT CREATE TASK 2");
     }
 
     auto tg = taskG.GetValue();
 
-    Self::Get().AddTask(tg);
+    tman.AddTask(tg);
     
 
     //Log::puts("Initializing scheduler...\n\r");
