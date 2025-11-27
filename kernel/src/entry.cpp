@@ -166,7 +166,7 @@ void f() {
             Self().GetTaskManager().RemoveTask(tid_g);
         }
         
-        const uint64_t target_ms = Self().GetTimer().GetCountMillis() + 2;
+        const uint64_t target_ms = Self().GetTimer().GetCountMillis() + 1;
         while (Self().GetTimer().GetCountMillis() < target_ms) {
             __asm__ volatile("pause");
         }
@@ -176,7 +176,7 @@ void f() {
 void g() {
     while (true) {
         Log::putsSafe("Task 2\n\r");
-        const uint64_t target_ms = Self().GetTimer().GetCountMillis() + 1;
+        const uint64_t target_ms = Self().GetTimer().GetCountMillis() + 2;
         while (Self().GetTimer().GetCountMillis() < target_ms) {
             __asm__ volatile("pause");
         }

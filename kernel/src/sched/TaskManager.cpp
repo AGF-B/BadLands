@@ -1,5 +1,7 @@
 #include <cstdint>
 
+#include <new>
+
 #include <mm/Heap.hpp>
 
 #include <sched/TaskContext.hpp>
@@ -33,7 +35,7 @@ namespace Scheduling {
         return nullptr;
     }
 
-    uint64_t TaskManager::AddTask(const TaskContext& context) {        
+    uint64_t TaskManager::AddTask(const TaskContext& context, bool blockable) {        
         if (context.CR3 == nullptr || context.InstructionPointer == nullptr || context.StackPointer == nullptr) {
             return 0;
         }
@@ -48,9 +50,14 @@ namespace Scheduling {
 
         Utils::LockGuard _{modify_lock};
 
-        new_task->blocked = false;
-        new_task->id = ++task_count; // id = number of tasks added since reset
-        new_task->context = context;
+        new (new_task) Task {
+            .blockable = blockable,
+            .blocked = false,
+            .id = ++task_count, // id = number of tasks added since reset
+            .prev = nullptr,
+            .next = nullptr,
+            .context = context
+        };
 
         if (head == nullptr) {
             head = new_task;
@@ -91,7 +98,7 @@ namespace Scheduling {
 
         auto* task = FindTask(task_id);
 
-        if (task != nullptr) {
+        if (task != nullptr && task->blockable) {
             task->blocked = true;
         }
     }

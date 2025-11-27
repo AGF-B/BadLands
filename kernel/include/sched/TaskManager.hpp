@@ -11,6 +11,7 @@ namespace Scheduling {
     class TaskManager {
     private:
         struct Task {
+            const bool blockable;
             bool blocked;
             uint64_t id;
             Task* prev;
@@ -28,7 +29,7 @@ namespace Scheduling {
     
     public:
         uint64_t GetTaskCount() const;
-        uint64_t AddTask(const TaskContext& context);
+        uint64_t AddTask(const TaskContext& context, bool blockable = true);
         void RemoveTask(uint64_t task_id);
         void BlockTask(uint64_t task_id) const;
         void UnblockTask(uint64_t task_id) const;

@@ -10,6 +10,7 @@
 #include <mm/Heap.hpp>
 
 #include <sched/Self.hpp>
+#include <sched/TaskContext.hpp>
 
 #include <screen/Log.hpp>
 
@@ -59,7 +60,13 @@ namespace {
         uint64_t GetCountMillis() const final {
             return PIT::GetCountMillis();
         }
-    } PITWrapper;
+    } static PITWrapper;
+
+    static void IdleTask() {
+        while (true) {
+            __asm__ volatile("hlt");
+        }
+    }
 }
 
 UnattachedSelf::APICTimerWrapper::TimerProvider::TimerProvider(APICTimerWrapper* timer_wrapper) : timer_wrapper{timer_wrapper} {}
@@ -163,6 +170,14 @@ uint64_t UnattachedSelf::APICTimerWrapper::GetCountMillis() const {
 
 UnattachedSelf::UnattachedSelf(uint8_t apic_id, uint8_t apic_uid, bool enabled, bool online_capable)
     : enabled(enabled), online_capable(online_capable), apic_id(apic_id), apic_uid(apic_uid) {
+    
+    auto idle_context = Scheduling::KernelTaskContext::Create(reinterpret_cast<void*>(&IdleTask));
+    if (!idle_context.HasValue()) {
+        Panic::PanicShutdown("COULD NOT CREATE IDLE TASK\n\r");
+    }
+
+    // create non-blockable idle task
+    task_manager.AddTask(idle_context.GetValue(), false);
 }
 
 UnattachedSelf* UnattachedSelf::AllocateProcessors(size_t count) {
