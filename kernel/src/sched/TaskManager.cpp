@@ -114,20 +114,24 @@ namespace Scheduling {
             return nullptr; // if can't change task, stay in current task
         }
 
-        auto* next = head->next;
-        head = next;
+        auto* const next = head->next;
+        auto* const current = head;
 
         modify_lock.unlock();
 
-        if (last != nullptr) {
-            head->context.StackPointer = stack_context;
+        if (switches++ != 0) {
+            current->context.StackPointer = stack_context;
+        }
+        else {
+            return &current->context;
         }
 
-        if (next == last) {
+        head = next;
+
+        if (next == current) {
             return nullptr; // signal no change in task
         }
 
-        last = next;
         return &head->context;
     }
 }
