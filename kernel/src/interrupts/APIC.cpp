@@ -1,6 +1,8 @@
 #include <cpuid.h>
 #include <cstdint>
 
+#include <new>
+
 #include <shared/memory/defs.hpp>
 
 #include <acpi/Interface.hpp>
@@ -15,6 +17,8 @@
 #include <interrupts/PIC.hpp>
 
 #include <mm/VirtualMemory.hpp>
+
+#include <sched/Self.hpp>
 
 #include <screen/Log.hpp>
 
@@ -447,6 +451,30 @@ namespace APIC {
 
 		uint8_t* type = reinterpret_cast<uint8_t*>(madt + 1);
 
+		size_t lapic_count = 0;
+
+		while (type < reinterpret_cast<uint8_t*>(madt) + madt->hdr.Length) {
+			switch (*type) {
+				case MADT::LocalAPIC::_Type: {
+					auto* ptr = reinterpret_cast<MADT::LocalAPIC*>(type);
+					++lapic_count;
+					type += ptr->Length;
+					break;
+				}
+				default:
+					type += *(type + 1);
+					break;
+			}
+		}
+
+		if (UnattachedSelf::AllocateProcessors(lapic_count) == nullptr) {
+			Panic::PanicShutdown("COULD NOT ALLOCATE MEMORY FOR PROCESSORS DATA\n\r");
+		}
+
+		Log::printf("[APIC] Enumerated %llu local APICs\n\r", lapic_count);
+
+		type = reinterpret_cast<uint8_t*>(madt + 1);
+
 		while (type < reinterpret_cast<uint8_t*>(madt) + madt->hdr.Length) {
 			switch (*type) {
 				case MADT::LocalAPIC::_Type: {
@@ -461,9 +489,12 @@ namespace APIC {
 								"Online capable" : "Disabled"
 					);
 
+					const bool isOnline = ptr->Flags & APIC_ONLINE;
+					const bool isOnlineCapable = ptr->Flags & APIC_CAPABLE;
+
 					LAPIC lapic = {
-						.Status = (ptr->Flags & APIC_ONLINE) != 0 ?
-							LAPIC::_Status::ONLINE : (ptr->Flags & APIC_CAPABLE) != 0 ?
+						.Status = isOnline != 0 ?
+							LAPIC::_Status::ONLINE : isOnlineCapable ?
 								LAPIC::_Status::CAPABLE : LAPIC::_Status::DISABLED,
 						.Flags = ptr->Flags,
 						.ID = ptr->APIC_ID,
@@ -473,6 +504,14 @@ namespace APIC {
 					if (LAPICs.insert(lapic.ID, lapic) == nullptr) {
 						Panic::PanicShutdown("APIC (COULD NOT CREATE ADEQUATE LOCAL APIC STRUCTURE)\n\r");
 					}
+
+					// initialize remote self structure
+					new (&UnattachedSelf::AccessRemote(ptr->APIC_ID)) UnattachedSelf(
+						ptr->APIC_ID,
+						ptr->ACPI_Processor_UID,
+						isOnline,
+						isOnlineCapable
+					);
 
 					type += ptr->Length;
 					break;

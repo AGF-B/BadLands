@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 
 #include <interrupts/Timer.hpp>
 
@@ -44,8 +45,8 @@ private:
         uint64_t GetCountMillis() const final;
     };
 
-    static inline UnattachedSelf* processors;
-    static inline size_t processor_count;
+    static inline UnattachedSelf* processors = nullptr;
+    static inline size_t processor_count = 0;
 
     bool enabled{false};
     bool online_capable{false};
@@ -59,6 +60,8 @@ private:
 public:
     UnattachedSelf(uint8_t apic_id, uint8_t apic_uid, bool enabled, bool online_capable);
 
+    static UnattachedSelf* AllocateProcessors(size_t count);
+    static UnattachedSelf& AccessRemote(uint8_t id);
     static UnattachedSelf& Attach();
 
     bool IsEnabled() const;
@@ -67,7 +70,7 @@ public:
     void ForceHaltRemote();
     [[noreturn]] static void ForceHalt();
 
-    Timer& GetPIT();
+    static Timer& GetPIT();
     Timer& GetTimer();
 
     Scheduling::TaskManager& GetTaskManager();

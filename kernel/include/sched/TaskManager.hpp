@@ -20,7 +20,7 @@ namespace Scheduling {
 
         mutable Utils::Lock modify_lock;
 
-        Task* last = nullptr;
+        uint64_t switches = 0;
         Task* head = nullptr;
         uint64_t task_count = 0;
 

@@ -1,3 +1,4 @@
+#include <cstddef>
 #include <cstdint>
 
 #include <interrupts/APIC.hpp>
@@ -5,6 +6,8 @@
 #include <interrupts/Panic.hpp>
 #include <interrupts/PIT.hpp>
 #include <interrupts/Timer.hpp>
+
+#include <mm/Heap.hpp>
 
 #include <sched/Self.hpp>
 
@@ -46,7 +49,7 @@ namespace {
         }
 
         void SetHandler(void (*handler)()) final {
-            PIT::ReattachIRQ(handler);
+            PIT::SetHandler(handler);
         }
 
         uint64_t GetCountMicros() const final {
@@ -80,7 +83,7 @@ void UnattachedSelf::APICTimerWrapper::Initialize() {
     static constexpr uint64_t CONFIG_GRANULARITY_MS = 19;
 
     int apic_timer_vector = Interrupts::ReserveInterrupt();
-    if (apic_timer_vector < 0) {
+    if (apic_timer_vector <= 0) {
         Panic::PanicShutdown("COULD NOT RESERVE IRQ FOR APIC TIMER\n\r");
     }
 
@@ -160,6 +163,23 @@ uint64_t UnattachedSelf::APICTimerWrapper::GetCountMillis() const {
 
 UnattachedSelf::UnattachedSelf(uint8_t apic_id, uint8_t apic_uid, bool enabled, bool online_capable)
     : enabled(enabled), online_capable(online_capable), apic_id(apic_id), apic_uid(apic_uid) {
+}
+
+UnattachedSelf* UnattachedSelf::AllocateProcessors(size_t count) {
+    if (processors == nullptr && count > 0) {
+        processors = static_cast<UnattachedSelf*>(Heap::Allocate(count * sizeof(UnattachedSelf)));
+        processor_count = count;
+    }
+
+    return processors;
+}
+
+UnattachedSelf& UnattachedSelf::AccessRemote(uint8_t id) {
+    if (id >= processor_count) {
+        Panic::Panic("ILLEGAL ACCESS TO INVALID REMOTE PROCESSOR\n\r");
+    }
+
+    return processors[id];
 }
 
 UnattachedSelf& UnattachedSelf::Attach() {

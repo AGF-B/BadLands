@@ -162,8 +162,13 @@ void f() {
     while (true) {
         Log::putsSafe("Task 1\n\r");
         ++i;
-        if (i == 2000000000) {
+        if (i == 2000) {
             Self().GetTaskManager().RemoveTask(tid_g);
+        }
+        
+        const uint64_t target_ms = Self().GetTimer().GetCountMillis() + 2;
+        while (Self().GetTimer().GetCountMillis() < target_ms) {
+            __asm__ volatile("pause");
         }
     }
 }
@@ -171,6 +176,10 @@ void f() {
 void g() {
     while (true) {
         Log::putsSafe("Task 2\n\r");
+        const uint64_t target_ms = Self().GetTimer().GetCountMillis() + 1;
+        while (Self().GetTimer().GetCountMillis() < target_ms) {
+            __asm__ volatile("pause");
+        }
     }
 }
 
@@ -254,7 +263,10 @@ LEGACY_EXPORT void KernelEntry() {
 
     PIT::Initialize();
 
-    /// TODO: make the APIC::Initialize method create the list of processors in Self    
+    __asm__ volatile("sti");
+
+    Self().GetTimer().Initialize();
+    
     auto taskF = Scheduling::KernelTaskContext::Create(reinterpret_cast<void*>(&f));
     if (!taskF.HasValue()) {
         Panic::PanicShutdown("COULD NOT CREATE TASK 1");
@@ -275,13 +287,10 @@ LEGACY_EXPORT void KernelEntry() {
     auto tg = taskG.GetValue();
 
     tman.AddTask(tg);
+
+    Log::puts("Initializing scheduler...\n\r");
     
-
-    //Log::puts("Initializing scheduler...\n\r");
-
-    //Scheduling::InitializeDispatcher(&tman);
-
-    __asm__ volatile("sti");
+    Scheduling::InitializeDispatcher();
 
     //Services::Shell::Entry();
 
