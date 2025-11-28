@@ -66,6 +66,7 @@ public:
 
     bool IsEnabled() const;
     bool IsOnlineCapable() const;
+    uint8_t GetID() const;
     void Reset();
     void ForceHaltRemote();
     [[noreturn]] static void ForceHalt();

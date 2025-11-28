@@ -217,6 +217,10 @@ bool UnattachedSelf::IsOnlineCapable() const {
     return online_capable;
 }
 
+uint8_t UnattachedSelf::GetID() const {
+    return apic_id;
+}
+
 void UnattachedSelf::Reset() {
     if (enabled) {
         // TODO: release all memory

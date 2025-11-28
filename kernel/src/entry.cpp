@@ -155,46 +155,17 @@ Kernel::KernelExports Kernel::Exports = {
     .deviceInterface = nullptr
 };
 
-static int tid_g = 0;
+void BootProcessorInit() {
+    auto* keyboardBuffer = Devices::KeyboardDispatcher::Initialize(Kernel::Exports.deviceInterface);
 
-void f() {
-    static int i = 0;
-    while (true) {
-        Log::putsSafe("Task 1\n\r");
-        ++i;
-        if (i == 2000) {
-            Self().GetTaskManager().RemoveTask(tid_g);
-        }
-        
-        const uint64_t target_ms = Self().GetTimer().GetCountMillis() + 1;
-        while (Self().GetTimer().GetCountMillis() < target_ms) {
-            __asm__ volatile("pause");
-        }
+    //Services::Shell::Entry();
+
+    //PCI::Enumerate();
+
+    while (1) {
+        __asm__ volatile("hlt");
     }
 }
-
-void g() {
-    while (true) {
-        Log::putsSafe("Task 2\n\r");
-        const uint64_t target_ms = Self().GetTimer().GetCountMillis() + 2;
-        while (Self().GetTimer().GetCountMillis() < target_ms) {
-            __asm__ volatile("pause");
-        }
-    }
-}
-
-static Interrupts::InterruptTrampoline apic_timer_handler(
-    [](void* stack, uint64_t error_code) {
-        static uint64_t i = 0;
-        i += 1;
-
-        APIC::SendEOI();
-
-        if (i % 1000 == 0) {
-            Log::printfSafe("APIC ticks: %llu\n\r", i);
-        }
-    }
-);
 
 LEGACY_EXPORT void KernelEntry() {
     __asm__ volatile("cli");
@@ -257,44 +228,20 @@ LEGACY_EXPORT void KernelEntry() {
 
     APIC::SetupLocalAPIC();
 
-    auto* keyboardBuffer = Devices::KeyboardDispatcher::Initialize(deviceInterface);
-
-    //SetupPS2Keyboard(keyboardBuffer);
-
     PIT::Initialize();
 
     __asm__ volatile("sti");
 
     Self().GetTimer().Initialize();
-    
-    auto taskF = Scheduling::KernelTaskContext::Create(reinterpret_cast<void*>(&f));
-    if (!taskF.HasValue()) {
-        Panic::PanicShutdown("COULD NOT CREATE TASK 1");
+
+    auto initTask = Scheduling::KernelTaskContext::Create(reinterpret_cast<void*>(&BootProcessorInit));
+    if (!initTask.HasValue()) {
+        Panic::PanicShutdown("COULD NOT CREATE INIT TASK\n\r");
     }
 
-    auto& self = Self();
-    auto& tman = self.GetTaskManager();
+    Self().GetTaskManager().AddTask(initTask.GetValue(), false);
 
-    auto tf = taskF.GetValue();
-
-    tman.AddTask(tf);
-
-    auto taskG = Scheduling::KernelTaskContext::Create(reinterpret_cast<void*>(&g));
-    if (!taskG.HasValue()) {
-        Panic::PanicShutdown("COULD NOT CREATE TASK 2");
-    }
-
-    auto tg = taskG.GetValue();
-
-    tman.AddTask(tg);
-
-    Log::puts("Initializing scheduler...\n\r");
-    
     Scheduling::InitializeDispatcher();
-
-    //Services::Shell::Entry();
-
-    //PCI::Enumerate();
 
     while (1) {
         __asm__ volatile("hlt");

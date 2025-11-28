@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 namespace APIC {
 	enum class IRQDeliveryMode {
 		FIXED,

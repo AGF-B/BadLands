@@ -1,6 +1,7 @@
 #include <sched/Self.hpp>
-
 #include <sched/Dispatcher.hpp>
+
+#include <screen/Log.hpp>
 
 namespace Scheduling {
     struct SwitchResult {
@@ -12,6 +13,7 @@ namespace Scheduling {
 
     void InitializeDispatcher() {
         Self().GetTimer().ReattachIRQ(&SCHEDULER_IRQ_HANDLER);
+        Log::printfSafe("[CPU %llu] Scheduler Initialized\n\r", Self().GetID());
     }
 
     extern "C" void SCHEDULER_IRQ_DISPATCHER(SwitchResult* result, void* stack_context) {
