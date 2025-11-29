@@ -246,6 +246,27 @@ void UnattachedSelf::ForceHaltRemote() {
     }
 }
 
+void UnattachedSelf::SpinWaitMillis(uint64_t ms) const {
+    const uint64_t target = local_timer.GetCountMillis() + ms;
+
+    while (local_timer.GetCountMillis() < target) {
+        __asm__ volatile("pause");
+    }
+}
+
+bool UnattachedSelf::SpinWaitMillsFor(uint64_t ms, bool (*predicate)(void*), void* args) const {
+    const uint64_t target = local_timer.GetCountMillis() + ms;
+
+    while (local_timer.GetCountMillis() < target) {
+        if (predicate(args)) {
+            return true;
+        }
+        __asm__ volatile("pause");
+    }
+
+    return false;
+}
+
 Timer& UnattachedSelf::GetPIT() {
     return PITWrapper;
 }

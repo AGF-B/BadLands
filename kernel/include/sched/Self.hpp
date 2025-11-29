@@ -71,6 +71,9 @@ public:
     void ForceHaltRemote();
     [[noreturn]] static void ForceHalt();
 
+    void SpinWaitMillis(uint64_t ms) const;
+    bool SpinWaitMillsFor(uint64_t ms, bool (*predicate)(void*), void* args) const;
+
     static Timer& GetPIT();
     Timer& GetTimer();
 
