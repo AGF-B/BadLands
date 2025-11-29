@@ -160,7 +160,7 @@ void BootProcessorInit() {
 
     //Services::Shell::Entry();
 
-    //PCI::Enumerate();
+    PCI::Enumerate();
 
     while (1) {
         __asm__ volatile("hlt");
