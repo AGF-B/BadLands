@@ -7,8 +7,6 @@
 #include <mm/VirtualMemory.hpp>
 #include <pci/Interface.hpp>
 
-#include <screen/Log.hpp>
-
 namespace PCI {
     Interface::Interface(uint8_t bus, uint8_t device, uint8_t function, void* ptr)
         : bus{bus}, device{device}, function{function},
@@ -108,8 +106,6 @@ namespace PCI {
 
                 void* address = reinterpret_cast<void*>(bar_value & BAR_MEM_ADDR_MASK);
                 size_t pages = (size + Shared::Memory::PAGE_SIZE - 1) / Shared::Memory::PAGE_SIZE;
-
-                Log::printf("BAR size: 0x%0.16llx\n\r", size);
 
                 return VirtualMemory::MapGeneralPages(address, pages, flags);
             }

@@ -1,3 +1,6 @@
+#include <cstdarg>
+#include <cstdint>
+
 #include <shared/Lock.hpp>
 #include <shared/LockGuard.hpp>
 
