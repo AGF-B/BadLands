@@ -95,6 +95,25 @@ namespace Devices {
             struct PortStatusChangeEventTRB : public EventTRB {
                 uint8_t GetPortID() const;
             };
+
+            struct CommandTRB : public TRB {
+            protected:
+                void SetCycle(bool cycle);
+                void SetTRBType(uint8_t type);
+                void SetSlotType(uint8_t type);
+            };
+
+            struct NoOpTRB : public CommandTRB {
+                static NoOpTRB Create(bool cycle);
+            };
+
+            struct EnableSlotTRB : public CommandTRB {
+                static EnableSlotTRB Create(bool cycle, uint8_t slot_type);
+            };
+
+            struct LinkTRB : public CommandTRB {
+                static LinkTRB Create(bool cycle, TRB* next);
+            };
         }
     }
 }

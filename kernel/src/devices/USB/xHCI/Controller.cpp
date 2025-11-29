@@ -2,6 +2,10 @@
 #include <new>
 
 #include <shared/memory/defs.hpp>
+#include <shared/LockGuard.hpp>
+#include <shared/MemoryOrdering.hpp>
+#include <shared/Response.hpp>
+#include <shared/SimpleAtomic.hpp>
 
 #include <devices/USB/xHCI/Controller.hpp>
 #include <devices/USB/xHCI/TRB.hpp>
@@ -9,7 +13,6 @@
 #include <interrupts/APIC.hpp>
 #include <interrupts/IDT.hpp>
 #include <interrupts/Panic.hpp>
-#include <interrupts/PIT.hpp>
 
 #include <mm/Heap.hpp>
 #include <mm/PhysicalMemory.hpp>
@@ -18,6 +21,9 @@
 
 #include <pci/Interface.hpp>
 #include <pci/MSI.hpp>
+
+#include <sched/Self.hpp>
+#include <sched/TaskContext.hpp>
 
 #include <screen/Log.hpp>
 
@@ -147,24 +153,28 @@ namespace Devices::USB::xHCI {
 
         APIC::SendEOI();
 
+        /// TODO: Implement special methods that buffer prints
+        /// happening in interrupt handlers
         while (event->GetCycle() == event_cycle) {
             switch (event->GetType()) {
                 case EventTRB::Type::TransferEvent:
-                    Log::puts("USB xHCI: Unhandled Transfer Event\n\r");
+                    Log::putsSafe("USB xHCI: Unhandled Transfer Event\n\r");
                     break;
                 case EventTRB::Type::CommandCompletionEvent: {
-                    Log::puts("USB xHCI: Unhandled Command Completion Event\n\r");
+                    command_completion.data[3] = event->data[3];
+                    command_completion.data[1] = event->data[1];
+                    command_completion.data[0] = event->data[0];
+                    __blatomic_store_4(&command_completion.data[2], event->data[2], Utils::MemoryOrder::SEQ_CST);
                     break;
                 }
                 case EventTRB::Type::PortStatusChangeEvent: {
-                    Log::printf(
-                        "USB xHCI: Unhandled Port Status Change Event on port %u\n\r",
-                        ((PortStatusChangeEventTRB*)event)->GetPortID() - 1
-                    );
+                    port_update = true;
+                    ports[reinterpret_cast<PortStatusChangeEventTRB*>(event)->GetPortID() - 1].dirty = true;
+                    Self().GetTaskManager().UnblockTask(port_updater_task_id);
                     break;
                 }
                 default: {
-                    Log::puts("USB xHCI: Unknown Event Type\n\r");
+                    Log::putsSafe("USB xHCI: Unknown Event Type\n\r");
                     break;
                 }
             }
@@ -228,7 +238,7 @@ namespace Devices::USB::xHCI {
     }
 
     void Controller::ConfigureMaxSlotsEnabled() {
-        const uint8_t max_slots_available = capability->HCCPARAMS1 & HCSPARAMS1_MAX_SLOTS_MASK;
+        const uint8_t max_slots_available = capability->HCSPARAMS1 & HCSPARAMS1_MAX_SLOTS_MASK;
 
         max_slots_enabled = opregs->CONFIG & CONFIG_MAX_SLOTS_EN_MASK;
 
@@ -326,6 +336,8 @@ namespace Devices::USB::xHCI {
 
         Utils::memset(command_ring, 0, RING_SIZE);
 
+        command_capacity = RING_SIZE / sizeof(TRB);
+
         const uint64_t crp = reinterpret_cast<uint64_t>(command_ring);
 
         static constexpr uint32_t CRP_MASK = 0xFFFFFFC0;
@@ -345,6 +357,23 @@ namespace Devices::USB::xHCI {
             VirtualMemory::FreeDMA(command_ring, GetCommandRingPages());
             command_ring = nullptr;
         }
+    }
+
+    void Controller::UpdateCommandPointer() {
+        if (++command_index >= command_capacity - 1) {
+            LinkTRB link = LinkTRB::Create(GetCommandCycle(), command_ring);
+            EnqueueCommand(link);            
+            command_index = 0;
+            command_cycle = !command_cycle;
+        }
+    }
+
+    void Controller::EnqueueCommand(const CommandTRB& trb) const {
+        command_ring[command_index] = trb;
+    }
+
+    void Controller::SignalCommand() const {
+        doorbell_regs->r[0] = 0;
     }
 
     constexpr size_t Controller::GetEventRingPages() {
@@ -556,7 +585,10 @@ namespace Devices::USB::xHCI {
             const uint8_t major = supported_protocol->GetMajorRevision();
 
             for (uint8_t p = offset; p < limit; ++p) {
-                ports[p - 1].major = major;
+                auto& port = ports[p - 1];
+                port.major = major;
+                port.slot_type = supported_protocol->GetProtocolSlotType();
+                port.dirty = true;
             }
 
             supported_protocol = reinterpret_cast<SupportedProtocolCapability*>(
@@ -567,63 +599,84 @@ namespace Devices::USB::xHCI {
         return true;
     }
 
+    void Controller::UpdatePortsTrampoline(Controller* controller) {
+        controller->UpdatePorts();
+    }
+
     void Controller::UpdatePorts() const {
-        for (size_t i = 0; i < GetMaxPorts(); ++i) {
-            uint8_t revision = ports[i].major;
+        while (true) {
+            for (size_t i = 0; i < GetMaxPorts(); ++i) {
+                if (ports[i].dirty) {
+                    ports[i].dirty = false;
+                    uint8_t revision = ports[i].major;
 
-            auto* const port = AccessOperationalPort(i);
+                    auto* const port = AccessOperationalPort(i);
 
-            if (!(port->PORTSC & OperationalPort::PORTSC_PP)) {
-                Log::printf("Port 0x%0.2hhx is powered off\n\r", i);
-                continue;
-            }
-
-            const bool finished_reset = port->PORTSC & OperationalPort::PORTSC_PRC;
-            const bool conn_changed   = port->PORTSC & OperationalPort::PORTSC_CSC;
-            const bool port_enabled   = port->PORTSC & OperationalPort::PORTSC_PED;
-            const bool is_connected   = port->PORTSC & OperationalPort::PORTSC_CCS;
-
-            // acknowledge and reset port flags
-            port->PORTSC = OperationalPort::PORTSC_CSC | OperationalPort::PORTSC_PRC | OperationalPort::PORTSC_PP;
-
-            if (!is_connected) {
-                Log::printf("Port 0x%0.2hhx is disconnected\n\r", i);
-                uint8_t& slot = ports[i].slot;
-
-                if (slot != 0) {
-                    DisableSlot(slot);
-                    slot = 0;
-                }
-
-                continue;
-            }
-
-            if (revision == 2) {
-                if (!(port_enabled && finished_reset)) {
-                    if (conn_changed) {
-                        // reset port
-                        Log::printf("Port 0x%0.2hhx (USB 2) reset in progress\n\r", i);
-                        port->PORTSC = OperationalPort::PORTSC_PR | OperationalPort::PORTSC_PP;
+                    if (!(port->PORTSC & OperationalPort::PORTSC_PP)) {
+                        Log::printfSafe("[xHCI] Port 0x%0.2hhx (USB %hhu) is powered off\n\r", i, revision);
                         continue;
                     }
 
-                    Log::printf("Port 0x%0.2hhx (USB 2) reset failed\n\r", i);
-                    
-                    continue;
+                    const bool finished_reset = port->PORTSC & OperationalPort::PORTSC_PRC;
+                    const bool conn_changed   = port->PORTSC & OperationalPort::PORTSC_CSC;
+                    const bool port_enabled   = port->PORTSC & OperationalPort::PORTSC_PED;
+                    const bool is_connected   = port->PORTSC & OperationalPort::PORTSC_CCS;
+
+                    // acknowledge and reset port flags
+                    port->PORTSC = OperationalPort::PORTSC_CSC | OperationalPort::PORTSC_PRC | OperationalPort::PORTSC_PP;
+
+                    if (!is_connected) {
+                        Log::printfSafe("[xHCI] Port 0x%0.2hhx (USB %hhu) is disconnected\n\r", i, revision);
+                        uint8_t& slot = ports[i].slot;
+
+                        if (slot != 0) {
+                            DisableSlot(slot);
+                            slot = 0;
+                        }
+
+                        continue;
+                    }
+
+                    if (revision == 2) {
+                        if (!(port_enabled && finished_reset)) {
+                            if (conn_changed) {
+                                // reset port
+                                Log::printfSafe("[xHCI] Port 0x%0.2hhx (USB 2) reset in progress\n\r", i);
+                                port->PORTSC = OperationalPort::PORTSC_PR | OperationalPort::PORTSC_PP;
+                                continue;
+                            }
+
+                            Log::printfSafe("[xHCI] Port 0x%0.2hhx (USB 2) reset failed\n\r", i);
+                            
+                            continue;
+                        }
+                    }
+                    else if (revision == 3) {
+                        if (!conn_changed | !port_enabled) {
+                            Log::printfSafe("[xHCI] Port 0x%0.2hhx (USB 3) reset failed\n\r", i);
+                            continue;
+                        }
+                    }
+                    else {
+                        continue;
+                    }
+
+                    const uint8_t speed_id = port->GetSpeedID();
+                    Log::printfSafe(
+                        "[xHCI] Device attached and connected to port 0x%0.2hhx (USB %hhu) with speed %u\n\r",
+                        i,
+                        ports[i].major,
+                        speed_id
+                    );
                 }
-            }
-            else if (revision == 3) {
-                if (!conn_changed | !port_enabled) {
-                    Log::printf("Port 0x%0.2hhx (USB 3) reset failed\n\r", i);
-                    continue;
-                }
-            }
-            else {
-                continue;
             }
 
-            const uint8_t speed_id = port->GetSpeedID();
-            Log::printf("Device attached and connected to port 0x%0.2hhx (USB %u) with speed %u\n\r", i, ports[i].major, speed_id);
+            __asm__ volatile("cli");
+            if (!port_update) {
+                Self().GetTaskManager().BlockTask(port_updater_task_id);
+            }
+            port_update = false;
+            __asm__ volatile("sti");
         }
     }
 
@@ -729,8 +782,11 @@ namespace Devices::USB::xHCI {
             return nullptr;
         }
 
+        Log::putsSafe("[xHCI] MMIO initialized\n\r");
+
         // reset hub
         if (!controller->ResetHost()) {
+            Log::putsSafe("[xHCI] Failed to reset host controller\n\r");
             Release(controller);
             return nullptr;
         }
@@ -738,29 +794,43 @@ namespace Devices::USB::xHCI {
         // configure the "max device slots enabled" field
         controller->ConfigureMaxSlotsEnabled();
 
+        Log::printfSafe("[xHCI] Max slots: %llu\n\r", controller->max_slots_enabled);
+
         // program the DCBAAP
         if (!controller->ConfigureDCBAAP()) {
+            Log::putsSafe("[xHCI] Failed to configure DCBAAP\n\r");
             Release(controller);
             return nullptr;
         }
+
+        Log::putsSafe("[xHCI] DCBAAP configured\n\r");
 
         // program the CRCR
         if (!controller->ConfigureCommandRing()) {
+            Log::putsSafe("[xHCI] Failed to configure command ring\n\r");
             Release(controller);
             return nullptr;
         }
+
+        Log::putsSafe("[xHCI] Command ring configured\n\r");
 
         // program the event ring
         if (!controller->ConfigureEventRing()) {
+            Log::putsSafe("[xHCI] Failed to configure event ring\n\r");
             Release(controller);
             return nullptr;
         }
 
+        Log::putsSafe("[xHCI] Event ring configured\n\r");
+
         // allocate scratchpad buffers
         if (!controller->ConfigureScratchpad()) {
+            Log::putsSafe("[xHCI] Failed to configure scratchpad buffers\n\r");
             Release(controller);
             return nullptr;
         }
+
+        Log::putsSafe("[xHCI] Scratchpad buffers initialized\n\r");
 
         // Program the primary interrupter
         controller->ConfigurePrimaryInterrupter();
@@ -807,27 +877,44 @@ namespace Devices::USB::xHCI {
         // register interrupt handler
         Interrupts::RegisterIRQ(controller->interrupt_vector, controller);
 
+        Log::putsSafe("[xHCI] Interrupts configured\n\r");
+
         // turn on the controller
         controller->EnableHost();
 
         controller->interface.EnableBusMaster();
+
+        Log::putsSafe("[xHCI] Host online\n\r");
 
         if (!controller->ConfigurePortVersions()) {
             Release(controller);
             return nullptr;
         }
 
-        // wait 500 ms
+        Log::putsSafe("[xHCI] Configured USB port versions\n\r");
 
-        Log::puts("Updating ports...\n\r");
+        // wait 200 ms to let the controller initialize itself
+        Self().SpinWaitMillis(200);
 
-        const auto target = PIT::GetCountMillis() + 500;
+        const auto updaterTask = Scheduling::KernelTaskContext::Create(
+            reinterpret_cast<void*>(&Controller::UpdatePortsTrampoline),
+            reinterpret_cast<uint64_t>(controller)
+        );
 
-        while (PIT::GetCountMillis() < target);
+        if (!updaterTask.HasValue()) {
+            Log::putsSafe("[xHCI] Failed to create port updater task\n\r");
+            Release(controller);
+            return nullptr;
+        }
 
-        controller->UpdatePorts();
+        controller->port_updater_task_id = Self().GetTaskManager().AddTask(updaterTask.GetValue());
+        if (controller->port_updater_task_id == 0) {
+            Log::putsSafe("[xHCI] Failed to schedule port updater task\n\r");
+            Release(controller);
+            return nullptr;
+        }
 
-        Log::puts("Ports update done\n\r");
+        Log::putsSafe("[xHCI] Port updater task configured\n\r");
 
         return controller;
     }
@@ -840,14 +927,16 @@ namespace Devices::USB::xHCI {
     bool Controller::ResetHost() const {
         opregs->USBCMD |= USBCMD_HCRST_FLAG;
 
-        const uint64_t target = PIT::GetCountMillis() + max_timeout_ms;
+        auto& timer = Self().GetTimer();
+
+        const uint64_t target = timer.GetCountMillis() + max_timeout_ms;
 
         // wait for controller to be ready
         while ((opregs->USBSTS & USBSTS_CNR_MASK) != 0) {
-            if (PIT::GetCountMillis() > target) {
+            if (timer.GetCountMillis() > target) {
                 return false;
             }
-            __asm__ volatile("hlt");
+            __asm__ volatile("pause");
         }
 
         return true;
@@ -867,6 +956,36 @@ namespace Devices::USB::xHCI {
 
     void Controller::DisableHostInterrupts() const {
         opregs->USBCMD &= ~USBCMD_INTE_FLAG;
+    }
+
+    bool Controller::GetCommandCycle() const {
+        return command_cycle;
+    }
+
+    Optional<TRB> Controller::SendCommand(const CommandTRB& trb) {
+        static constexpr uint64_t COMPLETION_TIMEOUT_MS = 200;
+        static constexpr auto COMMAND_STATUS_PREDICATE = [](void* arg) {
+            const Controller* controller = reinterpret_cast<Controller*>(arg);
+            return __blatomic_load_4(&controller->command_completion.data[2], Utils::MemoryOrder::SEQ_CST) != 0;
+        };
+
+        Utils::LockGuard _{command_lock};
+
+        EnqueueCommand(trb);
+        UpdateCommandPointer();
+
+        command_completion.data[0] = 0;
+        command_completion.data[1] = 0;
+        command_completion.data[2] = 0;
+        command_completion.data[3] = 0;
+
+        SignalCommand();
+
+        if (!Self().SpinWaitMillsFor(COMPLETION_TIMEOUT_MS, COMMAND_STATUS_PREDICATE, this)) {
+            return Optional<TRB>();
+        }
+
+        return Optional(command_completion);
     }
 
     void Controller::Destroy() {

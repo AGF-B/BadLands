@@ -66,4 +66,76 @@ namespace Devices::USB::xHCI {
         static constexpr uint8_t SHIFT = 24;
         return static_cast<uint8_t>(data[0] >> SHIFT);
     }
+
+    void CommandTRB::SetCycle(bool cycle) {
+        data[3] |= cycle ? 1 : 0;
+    }
+
+    void CommandTRB::SetTRBType(uint8_t type) {
+        static constexpr uint8_t SHIFT = 10;
+        static constexpr uint32_t MASK = 0x0000003F;
+
+        const uint32_t extended_type = static_cast<uint32_t>(type) & MASK;
+        data[3] |= extended_type << SHIFT;
+    }
+
+    void CommandTRB::SetSlotType(uint8_t type) {
+        static constexpr uint8_t SHIFT = 16;
+        static constexpr uint32_t MASK = 0x0000001F;
+
+        const uint32_t extended_type = static_cast<uint32_t>(type) & MASK;
+        data[3] |= extended_type << SHIFT;
+    }
+
+    NoOpTRB NoOpTRB::Create(bool cycle) {
+        static constexpr uint8_t NO_OP_TYPE = 23;
+
+        NoOpTRB trb;
+        
+        trb.data[0] = 0;
+        trb.data[1] = 0;
+        trb.data[2] = 0;
+        trb.data[3] = 0;
+
+        trb.SetCycle(cycle);
+        trb.SetTRBType(NO_OP_TYPE);
+
+        return trb;
+    }
+
+    EnableSlotTRB EnableSlotTRB::Create(bool cycle, uint8_t slot_type) {
+        static constexpr uint8_t ENABLE_SLOT_TYPE = 9;
+
+        EnableSlotTRB trb;
+
+        trb.data[0] = 0;
+        trb.data[1] = 0;
+        trb.data[2] = 0;
+        trb.data[3] = 0;
+
+        trb.SetCycle(cycle);
+        trb.SetTRBType(ENABLE_SLOT_TYPE);
+        trb.SetSlotType(slot_type);
+
+        return trb;
+    }
+
+    LinkTRB LinkTRB::Create(bool cycle, TRB* next) {
+        static constexpr uint8_t LINK_TYPE = 6;
+        static constexpr uint64_t NEXT_MASK = 0xFFFFFFFFFFFFFFF0;
+
+        const uint64_t raw_next = reinterpret_cast<uint64_t>(next) & NEXT_MASK;
+
+        LinkTRB trb;
+
+        trb.data[0] = static_cast<uint32_t>(raw_next);
+        trb.data[1] = static_cast<uint32_t>(raw_next >> 32);
+        trb.data[2] = 0;
+        trb.data[3] = 0;
+
+        trb.SetCycle(cycle);
+        trb.SetTRBType(LINK_TYPE);
+
+        return trb;
+    }
 }

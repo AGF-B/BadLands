@@ -2,6 +2,9 @@
 
 #include <cstdint>
 
+#include <shared/Lock.hpp>
+#include <shared/Response.hpp>
+
 #include <devices/USB/xHCI/TRB.hpp>
 #include <interrupts/InterruptProvider.hpp>
 #include <pci/Interface.hpp>
@@ -129,6 +132,8 @@ namespace Devices {
                 struct Port {
                     uint8_t major;
                     uint8_t slot;
+                    uint8_t slot_type;
+                    bool dirty;
                 };
 
                 const PCI::IType0 interface;
@@ -144,7 +149,12 @@ namespace Devices {
 
                 DCBAA* dcbaa = nullptr;
 
+                Utils::Lock command_lock;
                 TRB* command_ring = nullptr;
+                TRB command_completion;
+                size_t command_index = 0;
+                bool command_cycle = true;
+                size_t command_capacity = 0;
 
                 EventTRB* event_ring = nullptr;
                 ERSTEntry* event_ring_segment_table = nullptr;
@@ -156,6 +166,8 @@ namespace Devices {
                 uint16_t max_scratchpad_buffers = 0;
 
                 Port* ports = nullptr;
+                mutable bool port_update = false;
+                uint64_t port_updater_task_id = 0;
 
                 int interrupt_vector = -1;
 
@@ -183,6 +195,9 @@ namespace Devices {
                 static constexpr size_t GetCommandRingPages();
                 bool ConfigureCommandRing();
                 void ReleaseCommandRing();
+                void UpdateCommandPointer();
+                void EnqueueCommand(const CommandTRB& trb) const;
+                void SignalCommand() const;
 
                 static constexpr size_t GetEventRingPages();
                 static constexpr uint8_t GetEventRingSegments();
@@ -200,6 +215,7 @@ namespace Devices {
                 uint8_t GetMaxPorts() const;
                 OperationalPort* AccessOperationalPort(size_t portid) const;
                 bool ConfigurePortVersions();
+                static void UpdatePortsTrampoline(Controller* controller);
                 void UpdatePorts() const;
                 void ReleasePorts();
 
@@ -224,6 +240,9 @@ namespace Devices {
                 void DisableHost() const;
                 void EnableHostInterrupts() const;
                 void DisableHostInterrupts() const;
+
+                bool GetCommandCycle() const;
+                Optional<TRB> SendCommand(const CommandTRB& trb);
 
                 void Destroy();
             };
