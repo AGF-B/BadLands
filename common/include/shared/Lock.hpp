@@ -17,7 +17,7 @@ namespace Utils {
         }
 
         inline void lock() noexcept {
-            while (!trylock());
+            while (!trylock()) { __asm__ volatile("pause"); }
         }
 
         inline void unlock() noexcept {
