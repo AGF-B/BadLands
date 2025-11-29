@@ -13,15 +13,15 @@
 
 namespace {
 	[[noreturn]] static void kernelPanicShutdownFailed() {
-		Log::puts("------ KERNEL PANIC (MAXIMAL SEVERITY) ------\n\r");
-		Log::puts("Software shutdown failed, please perform a hard reset manually\n\r");
-		Log::puts("Press the power button for an extended period of time.\n\r");
+		Log::putsSafe("------ KERNEL PANIC (MAXIMAL SEVERITY) ------\n\r");
+		Log::putsSafe("Software shutdown failed, please perform a hard reset manually\n\r");
+		Log::putsSafe("Press the power button for an extended period of time.\n\r");
 		while (1);
 	}
 
 	[[noreturn]] static void kernelPanicShutdownSecondary(const EFI_RUNTIME_SERVICES* rtServices) {
-		Log::puts("KERNEL PANIC (HIGH SEVERITY): COULD NOT GET CURRENT TIME\n\r");
-		Log::puts("Switching to secondary method, shutting down soon...\n\r");
+		Log::putsSafe("KERNEL PANIC (HIGH SEVERITY): COULD NOT GET CURRENT TIME\n\r");
+		Log::putsSafe("Switching to secondary method, shutting down soon...\n\r");
 
 		// should be enough ticks to show the message
 		for (size_t i = 0; i < 80000000; ++i) {
@@ -35,24 +35,24 @@ namespace {
 
 namespace Panic {
     [[noreturn]] void Panic(const char* msg) {
-        Log::puts("\n\r------ KERNEL PANIC ------\n\r");
+        Log::putsSafe("\n\r------ KERNEL PANIC ------\n\r");
 
         if (msg != nullptr) {
-            Log::puts("\t\t ");
-            Log::puts(msg);
-            Log::puts("\n\r");
+            Log::putsSafe("\t\t ");
+            Log::putsSafe(msg);
+            Log::putsSafe("\n\r");
         }
 
         UnattachedSelf::ForceHalt();
     }
 
 	[[noreturn]] void Panic(void* panic_stack, const char* msg, uint64_t errv) {
-		Log::puts("\n\r------ KERNEL PANIC ------\n\r");
+		Log::putsSafe("\n\r------ KERNEL PANIC ------\n\r");
 
 		if (msg != nullptr) {
-			Log::puts("\t\t ");
-			Log::puts(msg);
-			Log::puts("\n\r");
+			Log::putsSafe("\t\t ");
+			Log::putsSafe(msg);
+			Log::putsSafe("\n\r");
 		}
 
 		Panic::DumpCore(panic_stack, errv);
@@ -64,10 +64,10 @@ namespace Panic {
     [[noreturn]] void PanicShutdown(const char* msg) {
 		auto* rtServices = Runtime::GetServices();
 
-		Log::puts("------ KERNEL PANIC SHUTDOWN ------\n\r");
-		Log::puts("\tREASON: ");
-		Log::puts(msg);
-		Log::puts("\n\rShutting down in 10 seconds...\n\r");
+		Log::putsSafe("------ KERNEL PANIC SHUTDOWN ------\n\r");
+		Log::putsSafe("\tREASON: ");
+		Log::putsSafe(msg);
+		Log::putsSafe("\n\rShutting down in 10 seconds...\n\r");
 
 		EFI_TIME time1, time2;
 		EFI_STATUS status = rtServices->GetTime(&time1, nullptr);

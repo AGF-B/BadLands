@@ -135,7 +135,7 @@ namespace PCI {
                 if (device_ecam->VendorID != 0xFFFF) {
                     if (device_ecam->BaseClassCode == 12 && device_ecam->SubclassCode == 3) {
                         if (device_ecam->ProgrammingInterface == 0x30) {
-                            Log::printf("Found USB xHCI controller at bus=%u,device=%u\n\r", bus, device);
+                            Log::printfSafe("Found USB xHCI controller at bus=%u,device=%u\n\r", bus, device);
 
                             auto* ptr = Devices::USB::xHCI::Controller::Initialize(
                                 bus,
@@ -145,8 +145,12 @@ namespace PCI {
                             );
 
                             if (ptr == nullptr) {
-                                Log::puts("USB xHCI controller initialization failed\n\r");
+                                Log::putsSafe("USB xHCI controller initialization failed\n\r");
                             }
+                            else {
+                                
+                            }
+
                             
                             __asm__ volatile("jmp .");
                         }
@@ -167,7 +171,7 @@ namespace PCI {
                         }
 
                         if (function_ecam->VendorID != 0xFFFF) {
-                            Log::printf(
+                            Log::printfSafe(
                                 "\tFunction found (class=%u,subclass=%u,pi=%u,bus=%u,device=%u,function=%u)\n\r",
                                 function_ecam->BaseClassCode,
                                 function_ecam->SubclassCode,

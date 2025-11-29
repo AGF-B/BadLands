@@ -96,7 +96,7 @@ namespace {
 
 namespace Devices::KeyboardDispatcher {
 	FS::IFNode* Initialize(FS::IFNode* deviceInterface) {
-		Log::puts("[GENKBD] Initializing generic keyboard multiplexer...\n\r");
+		Log::putsSafe("[GENKBD] Initializing generic keyboard multiplexer...\n\r");
 
 		static constexpr size_t bufferSize = 0x800 * sizeof(BasicKeyPacket);
 
@@ -125,7 +125,7 @@ namespace Devices::KeyboardDispatcher {
 			Panic::PanicShutdown("(GENKBD) COULD NOT ADD KEYBOARD MULTIPLEXER TO VFS\n\r");
 		}
 
-		Log::puts("[GENKBD] Generic keyboard multiplexer created\n\r");
+		Log::putsSafe("[GENKBD] Generic keyboard multiplexer created\n\r");
 
 		return multiplexer;
 	}
