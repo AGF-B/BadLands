@@ -151,7 +151,7 @@ namespace Devices {
 
                 Utils::Lock command_lock;
                 TRB* command_ring = nullptr;
-                TRB command_completion;
+                CommandCompletionEventTRB command_completion;
                 size_t command_index = 0;
                 bool command_cycle = true;
                 size_t command_capacity = 0;
@@ -216,10 +216,10 @@ namespace Devices {
                 OperationalPort* AccessOperationalPort(size_t portid) const;
                 bool ConfigurePortVersions();
                 static void UpdatePortsTrampoline(Controller* controller);
-                void UpdatePorts() const;
+                void UpdatePorts();
                 void ReleasePorts();
 
-                int16_t EnableSlot() const;
+                int16_t EnableSlot(uint8_t slot_type);
                 void DisableSlot(uint8_t id) const;
 
                 ExtendedCapability* FindExtendedCapability(uint8_t id) const;
@@ -242,7 +242,7 @@ namespace Devices {
                 void DisableHostInterrupts() const;
 
                 bool GetCommandCycle() const;
-                Optional<TRB> SendCommand(const CommandTRB& trb);
+                Optional<CommandCompletionEventTRB> SendCommand(const CommandTRB& trb);
 
                 void Destroy();
             };

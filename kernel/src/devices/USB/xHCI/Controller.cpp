@@ -603,7 +603,7 @@ namespace Devices::USB::xHCI {
         controller->UpdatePorts();
     }
 
-    void Controller::UpdatePorts() const {
+    void Controller::UpdatePorts() {
         while (true) {
             for (size_t i = 0; i < GetMaxPorts(); ++i) {
                 if (ports[i].dirty) {
@@ -662,12 +662,24 @@ namespace Devices::USB::xHCI {
                     }
 
                     const uint8_t speed_id = port->GetSpeedID();
+                    
                     Log::printfSafe(
                         "[xHCI] Device attached and connected to port 0x%0.2hhx (USB %hhu) with speed %u\n\r",
                         i,
                         ports[i].major,
                         speed_id
                     );
+
+                    auto slot_id = EnableSlot(ports[i].slot_type);
+
+                    if (slot_id < 0) {
+                        Log::printfSafe("[xHCI] Could not enable slot for device ttached on port 0x%0.2hhx\n\r", i);
+                        continue;
+                    }
+                    else {
+                        ports[i].slot = static_cast<uint8_t>(slot_id);
+                        Log::printfSafe("[xHCI] Port 0x%0.2hhx mapped to slot %hhu\n\r", i, ports[i].slot);
+                    }
                 }
             }
 
@@ -687,8 +699,22 @@ namespace Devices::USB::xHCI {
         }
     }
 
-    int16_t Controller::EnableSlot() const {
-        Panic::PanicShutdown("UNIMPLEMENTED XHCI CONTROLLER METHOD: EnableSlot\n\r");
+    int16_t Controller::EnableSlot(uint8_t slot_type) {
+        EnableSlotTRB trb = EnableSlotTRB::Create(GetCommandCycle(), slot_type);
+
+        auto result = SendCommand(trb);
+
+        if (!result.HasValue()) {
+            return -1;
+        }
+
+        const auto slot_id = result.GetValue().GetSlotID();
+
+        if (slot_id == 0) {
+            return -1;
+        }
+
+        return slot_id;
     }
 
     void Controller::DisableSlot(uint8_t id) const {
@@ -962,7 +988,7 @@ namespace Devices::USB::xHCI {
         return command_cycle;
     }
 
-    Optional<TRB> Controller::SendCommand(const CommandTRB& trb) {
+    Optional<CommandCompletionEventTRB> Controller::SendCommand(const CommandTRB& trb) {
         static constexpr uint64_t COMPLETION_TIMEOUT_MS = 200;
         static constexpr auto COMMAND_STATUS_PREDICATE = [](void* arg) {
             const Controller* controller = reinterpret_cast<Controller*>(arg);
@@ -982,7 +1008,7 @@ namespace Devices::USB::xHCI {
         SignalCommand();
 
         if (!Self().SpinWaitMillsFor(COMPLETION_TIMEOUT_MS, COMMAND_STATUS_PREDICATE, this)) {
-            return Optional<TRB>();
+            return Optional<CommandCompletionEventTRB>();
         }
 
         return Optional(command_completion);
