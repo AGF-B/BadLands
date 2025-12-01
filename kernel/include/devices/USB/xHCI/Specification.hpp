@@ -1,0 +1,343 @@
+#pragma once
+
+#include <cstdint>
+
+#include <shared/Response.hpp>
+
+namespace Devices {
+    namespace USB {
+        namespace xHCI {
+            class PortSpeed {
+            public:
+                enum : uint8_t {
+                    InvalidSpeed,
+                    LowSpeed,
+                    FullSpeed,
+                    HighSpeed,
+                    SuperSpeedGen1x1,
+                    SuperSpeedPlusGen1x2,
+                    SuperSpeedPlusGen2x1,
+                    SuperSpeedPlusGen2x2
+                };
+                
+                decltype(InvalidSpeed) value;
+
+                static PortSpeed FromSpeedID(uint8_t id);
+                uint8_t ToSpeedID() const;
+
+                bool operator==(const decltype(InvalidSpeed)& speed) const;
+                bool operator!=(const decltype(InvalidSpeed)& speed) const;
+            };
+
+            class SlotState {
+            public:
+                enum : uint8_t {
+                    Invalid,
+                    DisabledEnabled,
+                    Default,
+                    Addressed,
+                    Configured
+                };
+
+                decltype(Default) value;
+
+                static SlotState FromSlotState(uint8_t state);
+
+                bool operator==(const decltype(Default)& state) const;
+                bool operator!=(const decltype(Default)& state) const;
+            };
+
+            struct Context {
+            protected:
+                uint32_t data[8];
+
+            public:
+                void Reset();
+            };
+
+            template<class Base>
+            struct ContextEx : public Base {
+                uint32_t extended_data[8];
+
+                inline void Reset() {
+                    Base::Reset();
+                    extended_data[0] = 0;
+                    extended_data[1] = 0;
+                    extended_data[2] = 0;
+                    extended_data[3] = 0;
+                    extended_data[4] = 0;
+                    extended_data[5] = 0;
+                    extended_data[6] = 0;
+                    extended_data[7] = 0;
+                }
+            };
+
+            struct SlotContext : public Context {
+            private:
+                static constexpr uint32_t   ROUTE_STRING_MASK   = 0x000FFFFF;
+                static constexpr uint32_t   PORT_SPEED_MASK     = 0x00F00000;
+                static constexpr uint8_t    PORT_SPEED_SHIFT    = 20;
+
+            public:
+                uint32_t GetRouteString() const;
+                void SetRouteString(uint32_t route);
+
+                PortSpeed GetPortSpeed() const;
+                void SetPortSpeed(const PortSpeed& speed);
+
+                bool GetMTT() const = delete;
+                void SetMTT(bool enabled) const = delete;
+
+                bool GetHub() const = delete;
+                void SetHub(bool enabled) const = delete;
+
+                uint8_t GetContextEntries() const = delete;
+                void SetContextEntries(uint8_t count) const = delete;
+
+                uint16_t GetMaxExitLatency() const = delete;
+                void SetMaxExitLatency(uint16_t latency) = delete;
+
+                uint8_t GetRootHubPort() const = delete;
+                void SetRootHubPort(uint8_t port) = delete;
+
+                uint8_t GetPortsNumber() const = delete;
+                void SetPortsNumber(uint8_t count) = delete;
+
+                uint8_t GetParentHubSlotID() const = delete;
+                void SetParentHubSlotID(uint8_t slot) = delete;
+
+                uint8_t GetParentPort() const = delete;
+                void SetParentPort(uint8_t port) = delete;
+
+                uint8_t GetTTT() const = delete;
+                void SetTTT(uint8_t time) = delete;
+
+                uint16_t GetInterrupterTarget() const = delete;
+                void SetInterrupterTarget(uint16_t target) = delete;
+
+                uint8_t GetUSBAddress() const = delete;
+                void ResetUSBAddress() = delete;
+
+                SlotState GetSlotState() const = delete;
+                void ResetSlotState() = delete; 
+            };
+
+            struct SlotContextEx : public ContextEx<SlotContext> {
+            public:
+                using ContextEx::Reset;
+            };
+
+            class EndpointState {
+            public:
+                enum : uint8_t {
+                    Invalid,
+                    Disabled,
+                    Running,
+                    Halted,
+                    Stopped,
+                    Error,
+                    Reserved
+                };
+
+                decltype(Invalid) value;
+
+                static EndpointState FromEndpointState(uint8_t state);
+
+                bool operator==(const decltype(Invalid)& state) const;
+                bool operator!=(const decltype(Invalid)& state) const;
+            };
+
+            class EndpointType {
+            public:
+                enum : uint8_t {
+                    Invalid,
+                    IsochronousOut,
+                    BulkOut,
+                    InterruptOut,
+                    ControlBidirectional,
+                    IsochronousIn,
+                    BulkIn,
+                    InterruptIn
+                };
+
+                decltype(Invalid) value;
+
+                static EndpointType FromEndpointType(uint8_t type);
+
+                bool operator==(const decltype(Invalid)& type) const;
+                bool operator!=(const decltype(Invalid)& type) const;
+            };
+
+            struct EndpointContext : public Context {
+            public:
+                EndpointState GetEndpointState() const = delete;
+                
+                uint8_t GetMult() const = delete;
+                void SetMult(uint8_t mult) = delete;
+
+                uint8_t GetMaxPStreams() const = delete;
+                void SetMaxPStreams(uint8_t streams) = delete;
+
+                bool GetLSA() const = delete;
+                void SetLSA(bool lsa) = delete;
+
+                uint8_t GetInterval() const = delete;
+                void SetInterval(uint8_t interval) = delete;
+
+                uint8_t GetMaxESITPayload() const = delete;
+                void SetMaxESITPayload(uint8_t payload) = delete;
+
+                uint8_t GetErrorCount() const = delete;
+                void SetErrorCount(uint8_t count) = delete;
+
+                EndpointType GetEndpointType() const = delete;
+                void SetEndpointType(const EndpointType& type) = delete;
+
+                bool GetHID() const = delete;
+                void SetHID(bool hid) = delete;
+
+                uint8_t GetMaxBurstSize() const = delete;
+                void SetMaxBurstSize(uint8_t size) = delete;
+
+                uint16_t GetMaxPacketSize() const = delete;
+                void SetMaxPacketSize(uint16_t size) = delete;
+
+                bool GetDCS() const = delete;
+                void ToggleDCS() = delete;
+
+                uint64_t GetTRDequeuePointer() const = delete;
+                void SetTRDequeuePointer(uint64_t pointer) = delete;
+
+                uint16_t GetAverageTRBLength() const = delete;
+                void SetAverageTRBLength(uint16_t length) = delete;
+            };
+
+            struct EndpointContextEx : public ContextEx<EndpointContext> {
+            public:
+                using ContextEx::Reset;
+            };
+
+            struct EndpointContextPair {
+            public:
+                EndpointContext out;
+                EndpointContext in;
+            };
+
+            struct EndpointContextPairEx {
+            public:
+                EndpointContextEx out;
+                EndpointContextEx in;
+            };
+
+            struct InputControlContext : public Context {
+            public:
+                void SetDropContext(uint8_t id);
+                void SetAddContext(uint8_t id);
+                void SetConfigurationValue(uint8_t config);
+                void SetInterfaceNumber(uint8_t id);
+                void SetAlternateSetting(uint8_t v);
+            };
+
+            struct InputControlContextEx : public ContextEx<InputControlContext> {
+            public:
+                using ContextEx::Reset;
+            };
+
+            struct OutputDeviceContext {
+            public:
+                SlotContext slot;
+                EndpointContext control_endpoint;
+                EndpointContextPair endpoints[15];
+            };
+
+            struct OutputDeviceContextEx {
+            public:
+                SlotContextEx slot;
+                EndpointContextEx control_endpoint;
+                EndpointContextPairEx endpoints[15];
+            };
+
+            struct InputDeviceContext {
+            public:
+                InputControlContext input_control;
+                SlotContext slot;
+                EndpointContext control_endpoint;
+                EndpointContextPair endpoints[15];
+            };
+
+            struct InputDeviceContextEx {
+            public:
+                InputControlContextEx input_control;
+                SlotContextEx slot;
+                EndpointContextEx control_endpoint;
+                EndpointContextPairEx endpoints[15];
+            };
+
+            class ContextWrapper {
+            public:
+                virtual InputControlContext* GetInputControlContext() = 0;
+                virtual SlotContext* GetSlotContext(bool is_in) = 0;
+                virtual EndpointContext* GetControlEndpointContext(bool is_in) = 0;
+                virtual EndpointContext* GetInputEndpointContext(uint8_t id, bool is_in) = 0;
+                virtual EndpointContext* GetOutputEndpointContext(uint8_t id, bool is_in) = 0;
+
+                virtual void ResetInputControl() = 0;
+                virtual void ResetSlot() = 0;
+                virtual void ResetControlEndpoint() = 0;
+                virtual void ResetEndpoint(uint8_t id, bool is_in) = 0;
+                virtual void Reset() = 0;
+
+                static Optional<ContextWrapper*> Create(bool extended);
+                virtual void Release() = 0;
+            };
+
+            class ContextWrapperBasic : public ContextWrapper {
+            private:
+                ContextWrapperBasic(OutputDeviceContext* out, InputDeviceContext* in);
+
+                OutputDeviceContext* const output;
+                InputDeviceContext* const input;
+
+            public:
+                virtual InputControlContext* GetInputControlContext() final;
+                virtual SlotContext* GetSlotContext(bool is_in) final;
+                virtual EndpointContext* GetControlEndpointContext(bool is_in) final;
+                virtual EndpointContext* GetInputEndpointContext(uint8_t id, bool is_in) final;
+                virtual EndpointContext* GetOutputEndpointContext(uint8_t id, bool is_in) final;
+
+                virtual void ResetInputControl() final;
+                virtual void ResetSlot() final;
+                virtual void ResetControlEndpoint() final;
+                virtual void ResetEndpoint(uint8_t id, bool is_in) final;
+                virtual void Reset() final;
+
+                static Optional<ContextWrapper*> Create();
+                void Release() final;
+            };
+
+            class ContextWrapperEx : public ContextWrapper {
+            private:
+                ContextWrapperEx(OutputDeviceContextEx* out, InputDeviceContextEx* in);
+
+                OutputDeviceContextEx* const output;
+                InputDeviceContextEx* const input;
+
+            public:
+                virtual InputControlContext* GetInputControlContext() final;
+                virtual SlotContext* GetSlotContext(bool is_in) final;
+                virtual EndpointContext* GetControlEndpointContext(bool is_in) final;
+                virtual EndpointContext* GetInputEndpointContext(uint8_t id, bool is_in) final;
+                virtual EndpointContext* GetOutputEndpointContext(uint8_t id, bool is_in) final;
+
+                virtual void ResetInputControl() final;
+                virtual void ResetSlot() final;
+                virtual void ResetControlEndpoint() final;
+                virtual void ResetEndpoint(uint8_t id, bool is_in) final;
+                virtual void Reset() final;
+
+                static Optional<ContextWrapper*> Create();
+                void Release() final;
+            };
+        }
+    }
+}

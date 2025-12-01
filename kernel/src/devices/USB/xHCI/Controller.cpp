@@ -8,6 +8,7 @@
 #include <shared/SimpleAtomic.hpp>
 
 #include <devices/USB/xHCI/Controller.hpp>
+#include <devices/USB/xHCI/Device.hpp>
 #include <devices/USB/xHCI/TRB.hpp>
 
 #include <interrupts/APIC.hpp>
@@ -50,27 +51,6 @@ namespace {
 }
 
 namespace Devices::USB::xHCI {
-    Controller::PortSpeed Controller::PortSpeed::FromSpeedID(uint8_t id) {
-        switch (id) {
-            case 1: return PortSpeed { FullSpeed };
-            case 2: return PortSpeed { LowSpeed };
-            case 3: return PortSpeed { HighSpeed };
-            case 4: return PortSpeed { SuperSpeedGen1x1 };
-            case 5: return PortSpeed { SuperSpeedPlusGen2x1 };
-            case 6: return PortSpeed { SuperSpeedPlusGen1x2 };
-            case 7: return PortSpeed { SuperSpeedPlusGen2x2 };
-            default: return PortSpeed { InvalidSpeed };
-        }
-    }
-
-    bool Controller::PortSpeed::operator==(const decltype(InvalidSpeed)& speed) const {
-        return value == speed;
-    }
-
-    bool Controller::PortSpeed::operator!=(const decltype(InvalidSpeed)& speed) const {
-        return value != speed;
-    }
-
     uint8_t Controller::OperationalPort::GetSpeedID() const {
         static constexpr uint8_t SHIFT = 10;
         static constexpr uint32_t MASK = 0x0000000F;
@@ -282,10 +262,17 @@ namespace Devices::USB::xHCI {
             | Shared::Memory::PTE_UNCACHEABLE;
 
         const size_t dcbaa_pages = GetDCBAAPPages();
+        
+        devices = static_cast<Device*>(Heap::Allocate(max_slots_enabled));
+
+        if (devices == nullptr) {
+            return false;
+        }
 
         dcbaa = reinterpret_cast<DCBAA*>(VirtualMemory::AllocateDMA(dcbaa_pages));
 
         if (dcbaa == nullptr) {
+            Heap::Free(devices);
             return false;
         }
 
@@ -305,6 +292,8 @@ namespace Devices::USB::xHCI {
         if (dcbaa != nullptr) {
             VirtualMemory::FreeDMA(dcbaa, GetDCBAAPPages());
             dcbaa = nullptr;
+            Heap::Free(devices);
+            devices = nullptr;
         }
     }
 
@@ -678,7 +667,20 @@ namespace Devices::USB::xHCI {
                     }
                     else {
                         ports[i].slot = static_cast<uint8_t>(slot_id);
+
                         Log::printfSafe("[xHCI] Port 0x%0.2hhx mapped to slot %hhu\n\r", i, ports[i].slot);
+
+                        new (&devices[slot_id - 1]) Device(*this, DeviceDescriptor{
+                            .route_string = static_cast<uint8_t>(i + i),
+                            .parent_port = static_cast<uint8_t>(i + 1),
+                            .slot_id = ports[i].slot,
+                            .port_speed = PortSpeed::FromSpeedID(speed_id),
+                            .depth = 0
+                        });
+
+                        if (!devices[slot_id - 1].Initialize().IsSuccess()) {
+                            Log::printfSafe("[xHCI] Failed to initialize device on port 0x%0.2hhx\n\r", i);
+                        }
                     }
                 }
             }
@@ -1012,6 +1014,20 @@ namespace Devices::USB::xHCI {
         }
 
         return Optional(command_completion);
+    }
+
+    size_t Controller::GetContextSize() const {
+        if (context_size == 0) {
+            static constexpr uint32_t HCCPARAMS1_CSZ_MASK = 0x00000004;
+            static constexpr size_t DEFAULT_CONTEXT_SIZE = 32;
+            static constexpr size_t EXTENDED_CONTEXT_SIZE = 64;
+
+            context_size =
+                (capability->HCCPARAMS1 & HCCPARAMS1_CSZ_MASK) == 0 ?
+                DEFAULT_CONTEXT_SIZE : EXTENDED_CONTEXT_SIZE;
+        }
+
+        return context_size;
     }
 
     void Controller::Destroy() {

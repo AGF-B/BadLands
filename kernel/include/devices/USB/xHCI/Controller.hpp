@@ -1,10 +1,12 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 #include <shared/Lock.hpp>
 #include <shared/Response.hpp>
 
+#include <devices/USB/xHCI/Device.hpp>
 #include <devices/USB/xHCI/TRB.hpp>
 #include <interrupts/InterruptProvider.hpp>
 #include <pci/Interface.hpp>
@@ -41,27 +43,6 @@ namespace Devices {
                     uint32_t    DCBAAP_LO;
                     uint32_t    DCBAAP_HI;
                     uint32_t    CONFIG;
-                };
-
-                class PortSpeed {
-                public:
-                    enum {
-                        InvalidSpeed,
-                        LowSpeed,
-                        FullSpeed,
-                        HighSpeed,
-                        SuperSpeedGen1x1,
-                        SuperSpeedPlusGen1x2,
-                        SuperSpeedPlusGen2x1,
-                        SuperSpeedPlusGen2x2
-                    };
-                    
-                    decltype(InvalidSpeed) value;
-
-                    static PortSpeed FromSpeedID(uint8_t id);
-
-                    bool operator==(const decltype(InvalidSpeed)& speed) const;
-                    bool operator!=(const decltype(InvalidSpeed)& speed) const;
                 };
 
                 struct OperationalPort {
@@ -148,6 +129,7 @@ namespace Devices {
                 uint8_t max_slots_enabled = 0;
 
                 DCBAA* dcbaa = nullptr;
+                Device* devices = nullptr;
 
                 Utils::Lock command_lock;
                 TRB* command_ring = nullptr;
@@ -170,6 +152,8 @@ namespace Devices {
                 uint64_t port_updater_task_id = 0;
 
                 int interrupt_vector = -1;
+
+                mutable size_t context_size = 0;
 
                 Controller(const PCI::Interface& interface);
 
@@ -243,6 +227,8 @@ namespace Devices {
 
                 bool GetCommandCycle() const;
                 Optional<CommandCompletionEventTRB> SendCommand(const CommandTRB& trb);
+
+                size_t GetContextSize() const;
 
                 void Destroy();
             };

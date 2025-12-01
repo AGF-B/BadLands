@@ -42,3 +42,17 @@ private:
     bool hasValue;
     [[maybe_unused]] T value;
 };
+
+class Success {
+public:
+    explicit inline Success(bool isSuccess = true) : isSuccess{isSuccess} {}
+    static inline Success MakeSuccess() { return Success(true); }
+    static inline Success MakeFailure() { return Success(false); }
+    
+    inline bool IsSuccess() const {
+        return isSuccess;
+    }
+
+private:
+    bool isSuccess;
+};

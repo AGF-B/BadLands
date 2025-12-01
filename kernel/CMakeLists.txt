@@ -31,6 +31,8 @@ add_executable(KERNEL_IMG
     "src/devices/PS2/KeyboardEvent.cpp"
     "src/devices/PS2/Keypoints.cpp"
     "src/devices/USB/xHCI/Controller.cpp"
+    "src/devices/USB/xHCI/Device.cpp"
+    "src/devices/USB/xHCI/Specification.cpp"
     "src/devices/USB/xHCI/TRB.cpp"
     "src/fs/IFNode.cpp"
     "src/fs/NPFS.cpp"
