@@ -45,14 +45,19 @@ private:
 
 class Success {
 public:
-    explicit inline Success(bool isSuccess = true) : isSuccess{isSuccess} {}
-    static inline Success MakeSuccess() { return Success(true); }
-    static inline Success MakeFailure() { return Success(false); }
+    explicit inline constexpr Success(bool isSuccess = true) : isSuccess{isSuccess} {}
+    static inline constexpr Success MakeSuccess() { return Success(true); }
+    static inline constexpr Success MakeFailure() { return Success(false); }
     
-    inline bool IsSuccess() const {
+    inline bool constexpr IsSuccess() const {
         return isSuccess;
     }
 
 private:
     bool isSuccess;
 };
+
+static inline constexpr Success Failure() {
+    return Success(false);
+}
+
