@@ -671,8 +671,9 @@ namespace Devices::USB::xHCI {
                         Log::printfSafe("[xHCI] Port 0x%0.2hhx mapped to slot %hhu\n\r", i, ports[i].slot);
 
                         new (&devices[slot_id - 1]) Device(*this, DeviceDescriptor{
-                            .route_string = static_cast<uint8_t>(i + i),
+                            .route_string = 0,
                             .parent_port = static_cast<uint8_t>(i + 1),
+                            .root_hub_port = static_cast<uint8_t>(i + 1),
                             .slot_id = ports[i].slot,
                             .port_speed = PortSpeed::FromSpeedID(speed_id),
                             .depth = 0
@@ -1028,6 +1029,11 @@ namespace Devices::USB::xHCI {
         }
 
         return context_size;
+    }
+
+    bool Controller::HasExtendedContext() const {
+        static constexpr size_t EXTENDED_CONTEXT_SIZE = 64;
+        return GetContextSize() == EXTENDED_CONTEXT_SIZE;
     }
 
     void Controller::Destroy() {

@@ -2,7 +2,10 @@
 
 #include <cstdint>
 
+#include <shared/Lock.hpp>
 #include <shared/Response.hpp>
+
+#include <devices/USB/xHCI/TRB.hpp>
 
 namespace Devices {
     namespace USB {
@@ -74,9 +77,13 @@ namespace Devices {
 
             struct SlotContext : public Context {
             private:
-                static constexpr uint32_t   ROUTE_STRING_MASK   = 0x000FFFFF;
-                static constexpr uint32_t   PORT_SPEED_MASK     = 0x00F00000;
-                static constexpr uint8_t    PORT_SPEED_SHIFT    = 20;
+                static constexpr uint32_t   ROUTE_STRING_MASK       = 0x000FFFFF;
+                static constexpr uint32_t   PORT_SPEED_MASK         = 0x00F00000;
+                static constexpr uint8_t    PORT_SPEED_SHIFT        = 20;
+                static constexpr uint32_t   CONTEXT_ENTRIES_MASK    = 0xF8000000;
+                static constexpr uint8_t    CONTEXT_ENTRIES_SHIFT   = 27;
+                static constexpr uint32_t   ROOT_HUB_PORT_MASK      = 0x00FF0000;
+                static constexpr uint8_t    ROOT_HUB_PORT_SHIFT     = 16;
 
             public:
                 uint32_t GetRouteString() const;
@@ -86,19 +93,19 @@ namespace Devices {
                 void SetPortSpeed(const PortSpeed& speed);
 
                 bool GetMTT() const = delete;
-                void SetMTT(bool enabled) const = delete;
+                void SetMTT(bool enabled) = delete;
 
                 bool GetHub() const = delete;
-                void SetHub(bool enabled) const = delete;
+                void SetHub(bool enabled) = delete;
 
-                uint8_t GetContextEntries() const = delete;
-                void SetContextEntries(uint8_t count) const = delete;
+                uint8_t GetContextEntries() const;
+                void SetContextEntries(uint8_t count);
 
                 uint16_t GetMaxExitLatency() const = delete;
                 void SetMaxExitLatency(uint16_t latency) = delete;
 
-                uint8_t GetRootHubPort() const = delete;
-                void SetRootHubPort(uint8_t port) = delete;
+                uint8_t GetRootHubPort() const;
+                void SetRootHubPort(uint8_t port);
 
                 uint8_t GetPortsNumber() const = delete;
                 void SetPortsNumber(uint8_t count) = delete;
@@ -162,13 +169,19 @@ namespace Devices {
 
                 decltype(Invalid) value;
 
+                EndpointType(const decltype(Invalid)& type);
                 static EndpointType FromEndpointType(uint8_t type);
+                uint8_t ToEndpointType() const;
 
                 bool operator==(const decltype(Invalid)& type) const;
                 bool operator!=(const decltype(Invalid)& type) const;
             };
 
             struct EndpointContext : public Context {
+            private:
+                static constexpr uint32_t   ENDPOINT_TYPE_MASK = 0x00000038;
+                static constexpr uint8_t    ENDPOINT_TYPE_SHIFT = 3; 
+
             public:
                 EndpointState GetEndpointState() const = delete;
                 
@@ -190,8 +203,8 @@ namespace Devices {
                 uint8_t GetErrorCount() const = delete;
                 void SetErrorCount(uint8_t count) = delete;
 
-                EndpointType GetEndpointType() const = delete;
-                void SetEndpointType(const EndpointType& type) = delete;
+                EndpointType GetEndpointType() const;
+                void SetEndpointType(const EndpointType& type);
 
                 bool GetHID() const = delete;
                 void SetHID(bool hid) = delete;
@@ -275,6 +288,9 @@ namespace Devices {
 
             class ContextWrapper {
             public:
+                virtual void* GetInputDeviceContextAddress() const = 0;
+                virtual void* GetOutputDeviceContextAddress() const = 0;
+
                 virtual InputControlContext* GetInputControlContext() = 0;
                 virtual SlotContext* GetSlotContext(bool is_in) = 0;
                 virtual EndpointContext* GetControlEndpointContext(bool is_in) = 0;
@@ -291,7 +307,7 @@ namespace Devices {
                 virtual void Release() = 0;
             };
 
-            class ContextWrapperBasic : public ContextWrapper {
+            class ContextWrapperBasic final : public ContextWrapper {
             private:
                 ContextWrapperBasic(OutputDeviceContext* out, InputDeviceContext* in);
 
@@ -299,23 +315,26 @@ namespace Devices {
                 InputDeviceContext* const input;
 
             public:
-                virtual InputControlContext* GetInputControlContext() final;
-                virtual SlotContext* GetSlotContext(bool is_in) final;
-                virtual EndpointContext* GetControlEndpointContext(bool is_in) final;
-                virtual EndpointContext* GetInputEndpointContext(uint8_t id, bool is_in) final;
-                virtual EndpointContext* GetOutputEndpointContext(uint8_t id, bool is_in) final;
+                virtual void* GetInputDeviceContextAddress() const;
+                virtual void* GetOutputDeviceContextAddress() const;
 
-                virtual void ResetInputControl() final;
-                virtual void ResetSlot() final;
-                virtual void ResetControlEndpoint() final;
-                virtual void ResetEndpoint(uint8_t id, bool is_in) final;
-                virtual void Reset() final;
+                virtual InputControlContext* GetInputControlContext();
+                virtual SlotContext* GetSlotContext(bool is_in);
+                virtual EndpointContext* GetControlEndpointContext(bool is_in);
+                virtual EndpointContext* GetInputEndpointContext(uint8_t id, bool is_in);
+                virtual EndpointContext* GetOutputEndpointContext(uint8_t id, bool is_in);
+
+                virtual void ResetInputControl();
+                virtual void ResetSlot();
+                virtual void ResetControlEndpoint();
+                virtual void ResetEndpoint(uint8_t id, bool is_in);
+                virtual void Reset();
 
                 static Optional<ContextWrapper*> Create();
-                void Release() final;
+                void Release();
             };
 
-            class ContextWrapperEx : public ContextWrapper {
+            class ContextWrapperEx final : public ContextWrapper {
             private:
                 ContextWrapperEx(OutputDeviceContextEx* out, InputDeviceContextEx* in);
 
@@ -323,20 +342,44 @@ namespace Devices {
                 InputDeviceContextEx* const input;
 
             public:
-                virtual InputControlContext* GetInputControlContext() final;
-                virtual SlotContext* GetSlotContext(bool is_in) final;
-                virtual EndpointContext* GetControlEndpointContext(bool is_in) final;
-                virtual EndpointContext* GetInputEndpointContext(uint8_t id, bool is_in) final;
-                virtual EndpointContext* GetOutputEndpointContext(uint8_t id, bool is_in) final;
+                virtual void* GetInputDeviceContextAddress() const;
+                virtual void* GetOutputDeviceContextAddress() const;
 
-                virtual void ResetInputControl() final;
-                virtual void ResetSlot() final;
-                virtual void ResetControlEndpoint() final;
-                virtual void ResetEndpoint(uint8_t id, bool is_in) final;
-                virtual void Reset() final;
+                virtual InputControlContext* GetInputControlContext();
+                virtual SlotContext* GetSlotContext(bool is_in);
+                virtual EndpointContext* GetControlEndpointContext(bool is_in);
+                virtual EndpointContext* GetInputEndpointContext(uint8_t id, bool is_in);
+                virtual EndpointContext* GetOutputEndpointContext(uint8_t id, bool is_in);
+
+                virtual void ResetInputControl();
+                virtual void ResetSlot();
+                virtual void ResetControlEndpoint();
+                virtual void ResetEndpoint(uint8_t id, bool is_in);
+                virtual void Reset();
 
                 static Optional<ContextWrapper*> Create();
-                void Release() final;
+                void Release();
+            };
+
+            class TransferRing {
+            private:
+                Utils::Lock lock;
+                TransferTRB* const base;
+                size_t index;
+                size_t capacity;
+                bool cycle = false;
+
+                TransferRing(TransferTRB* base, size_t capacity);
+
+                void EnqueueTRB(const TRB& trb);
+                void UpdatePointer();
+
+            public:
+                static Optional<TransferRing*> Create(size_t pages);
+
+                void Release();
+                bool GetCycle() const;
+                void Enqueue(const TransferTRB& trb);
             };
         }
     }

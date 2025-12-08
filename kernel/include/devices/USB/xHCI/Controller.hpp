@@ -229,6 +229,7 @@ namespace Devices {
                 Optional<CommandCompletionEventTRB> SendCommand(const CommandTRB& trb);
 
                 size_t GetContextSize() const;
+                bool HasExtendedContext() const;
 
                 void Destroy();
             };

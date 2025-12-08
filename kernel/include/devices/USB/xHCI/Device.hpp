@@ -14,6 +14,7 @@ namespace Devices {
             struct DeviceDescriptor {
                 uint32_t route_string;
                 uint8_t parent_port;
+                uint8_t root_hub_port;
                 uint8_t slot_id;
                 PortSpeed port_speed;
                 uint8_t depth;
@@ -24,14 +25,14 @@ namespace Devices {
                 Controller& controller;
                 const DeviceDescriptor descriptor;
 
-
-
-                void OnFailure();
+                ContextWrapper* context_wrapper = nullptr;
+                TransferRing* control_transfer_ring = nullptr;
 
             public:
                 Device(Controller& controller, const DeviceDescriptor& descriptor);
 
                 Success Initialize();
+                void Release();
             };
         }
     }

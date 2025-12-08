@@ -2,12 +2,19 @@
 
 #include <new>
 
+#include <shared/Lock.hpp>
+#include <shared/LockGuard.hpp>
 #include <shared/Response.hpp>
+#include <shared/memory/defs.hpp>
 
 #include <devices/USB/xHCI/Specification.hpp>
+#include <devices/USB/xHCI/TRB.hpp>
 
 #include <mm/Heap.hpp>
+#include <mm/Utils.hpp>
 #include <mm/VirtualMemory.hpp>
+
+#include <sched/Self.hpp>
 
 namespace Devices::USB::xHCI {
     PortSpeed PortSpeed::FromSpeedID(uint8_t id) {
@@ -84,7 +91,23 @@ namespace Devices::USB::xHCI {
     }
 
     void SlotContext::SetPortSpeed(const PortSpeed& speed) {
-        data[0] = (data[0] & ~PORT_SPEED_MASK) | ((speed.ToSpeedID() << PORT_SPEED_SHIFT) & PORT_SPEED_MASK);
+        data[0] = (data[0] & ~PORT_SPEED_MASK) | ((static_cast<uint32_t>(speed.ToSpeedID()) << PORT_SPEED_SHIFT) & PORT_SPEED_MASK);
+    }
+
+    uint8_t SlotContext::GetContextEntries() const {
+        return static_cast<uint8_t>((data[0] & CONTEXT_ENTRIES_MASK) >> CONTEXT_ENTRIES_SHIFT);
+    }
+
+    void SlotContext::SetContextEntries(uint8_t count) {
+        data[0] = (data[0] & ~CONTEXT_ENTRIES_MASK) | ((static_cast<uint32_t>(count) << CONTEXT_ENTRIES_SHIFT) & CONTEXT_ENTRIES_MASK);
+    }
+
+    uint8_t SlotContext::GetRootHubPort() const {
+        return static_cast<uint8_t>((data[1] & ROOT_HUB_PORT_MASK) >> ROOT_HUB_PORT_SHIFT);
+    }
+
+    void SlotContext::SetRootHubPort(uint8_t port) {
+        data[1] = (data[1] & ~ROOT_HUB_PORT_MASK) | ((static_cast<uint32_t>(port) << ROOT_HUB_PORT_SHIFT) & ROOT_HUB_PORT_MASK);
     }
 
     EndpointState EndpointState::FromEndpointState(uint8_t state) {
@@ -109,6 +132,10 @@ namespace Devices::USB::xHCI {
         return value != state;
     }
 
+    EndpointType::EndpointType(const decltype(Invalid)& type) {
+        value = type;
+    }
+
     EndpointType EndpointType::FromEndpointType(uint8_t type) {
         switch (type) {
             case 0: return EndpointType { Invalid };
@@ -123,12 +150,33 @@ namespace Devices::USB::xHCI {
         }
     }
 
+    uint8_t EndpointType::ToEndpointType() const {
+        if (*this == Invalid) return 0;
+        else if (*this == IsochronousOut) return 1;
+        else if (*this == BulkOut) return 2;
+        else if (*this == InterruptOut) return 3;
+        else if (*this == ControlBidirectional) return 4;
+        else if (*this == IsochronousIn) return 5;
+        else if (*this == BulkIn) return 6;
+        else if (*this == InterruptIn) return 7;
+        else return 0;
+    }
+
     bool EndpointType::operator==(const decltype(Invalid)& type) const {
         return value == type;
     }
 
     bool EndpointType::operator!=(const decltype(Invalid)& type) const {
         return value != type;
+    }
+
+    EndpointType EndpointContext::GetEndpointType() const {
+        const uint8_t type = static_cast<uint8_t>((data[1] & ENDPOINT_TYPE_MASK) >> ENDPOINT_TYPE_SHIFT);
+        return EndpointType::FromEndpointType(type);
+    }
+
+    void EndpointContext::SetEndpointType(const EndpointType& type) {
+        data[1] = (data[1] & ~ENDPOINT_TYPE_MASK) | ((static_cast<uint32_t>(type.ToEndpointType()) << ENDPOINT_TYPE_SHIFT) & ENDPOINT_TYPE_MASK);
     }
 
     void InputControlContext::SetDropContext(uint8_t id) {
@@ -172,6 +220,14 @@ namespace Devices::USB::xHCI {
 
     ContextWrapperBasic::ContextWrapperBasic(OutputDeviceContext* out, InputDeviceContext* in)
         : output{out}, input{in} {}
+
+    void* ContextWrapperBasic::GetInputDeviceContextAddress() const {
+        return input;
+    }
+
+    void* ContextWrapperBasic::GetOutputDeviceContextAddress() const {
+        return output;
+    }
 
     InputControlContext* ContextWrapperBasic::GetInputControlContext() {
         return &input->input_control;
@@ -272,6 +328,14 @@ namespace Devices::USB::xHCI {
     ContextWrapperEx::ContextWrapperEx(OutputDeviceContextEx* out, InputDeviceContextEx* in)
         : output{out}, input{in} {}
 
+    void* ContextWrapperEx::GetInputDeviceContextAddress() const {
+        return input;
+    }
+
+    void* ContextWrapperEx::GetOutputDeviceContextAddress() const {
+        return output;
+    }
+
     InputControlContext* ContextWrapperEx::GetInputControlContext() {
         return &input->input_control;
     }
@@ -366,5 +430,65 @@ namespace Devices::USB::xHCI {
     void ContextWrapperEx::Release() {
         VirtualMemory::FreeDMA(output, 2);
         Heap::Free(this);
+    }
+
+    TransferRing::TransferRing(TransferTRB* base, size_t capacity)
+        : base{base}, index{0}, capacity{capacity}, cycle{true} { }
+
+    void TransferRing::EnqueueTRB(const TRB& trb) {
+        static constexpr uint64_t WAIT_GRANULARITY_MS = 20;
+
+        while (base[index].GetCycle() == trb.GetCycle()){
+            Self().SpinWaitMillis(WAIT_GRANULARITY_MS);
+        }
+
+        base[index] = reinterpret_cast<const TransferTRB&>(trb);
+    }
+
+    void TransferRing::UpdatePointer() {
+        if (++index >= capacity - 1) {
+            LinkTRB link = LinkTRB::Create(GetCycle(), base);
+            EnqueueTRB(link);            
+            index = 0;
+            cycle = !cycle;
+        }
+    }
+
+    Optional<TransferRing*> TransferRing::Create(size_t pages) {
+        void* const object_memory = Heap::Allocate(sizeof(TransferRing));
+
+        if (object_memory == nullptr) {
+            return Optional<TransferRing*>();
+        }
+
+        void* const ring_memory = VirtualMemory::AllocateDMA(pages);
+
+        if (ring_memory == nullptr) {
+            Heap::Free(object_memory);
+            return Optional<TransferRing*>();
+        }
+
+        const size_t allocated = pages * Shared::Memory::PAGE_SIZE;
+        const size_t capacity = allocated / sizeof(TransferTRB);
+        TransferTRB* const ring_base = static_cast<TransferTRB*>(ring_memory);
+
+        Utils::memset(ring_base, 0, allocated);
+        
+        return Optional<TransferRing*>(new (object_memory) TransferRing(ring_base, capacity));
+    }
+
+    void TransferRing::Release() {
+        VirtualMemory::FreeDMA(base, (capacity * sizeof(TransferTRB)));
+    }
+
+    bool TransferRing::GetCycle() const {
+        return cycle;
+    }
+
+    void TransferRing::Enqueue(const TransferTRB& trb) {
+        Utils::LockGuard _{lock};
+
+        EnqueueTRB(trb);
+        UpdatePointer();
     }
 }

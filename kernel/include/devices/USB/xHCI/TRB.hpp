@@ -114,6 +114,10 @@ namespace Devices {
             struct LinkTRB : public CommandTRB {
                 static LinkTRB Create(bool cycle, TRB* next);
             };
+
+            struct TransferTRB : public TRB {
+
+            };
         }
     }
 }
