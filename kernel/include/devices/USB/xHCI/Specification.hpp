@@ -25,6 +25,8 @@ namespace Devices {
                 
                 decltype(InvalidSpeed) value;
 
+                operator decltype(InvalidSpeed) () const;
+
                 static PortSpeed FromSpeedID(uint8_t id);
                 uint8_t ToSpeedID() const;
 
@@ -170,6 +172,8 @@ namespace Devices {
                 decltype(Invalid) value;
 
                 EndpointType(const decltype(Invalid)& type);
+                operator decltype(Invalid) () const;
+
                 static EndpointType FromEndpointType(uint8_t type);
                 uint8_t ToEndpointType() const;
 
@@ -179,29 +183,44 @@ namespace Devices {
 
             struct EndpointContext : public Context {
             private:
-                static constexpr uint32_t   ENDPOINT_TYPE_MASK = 0x00000038;
-                static constexpr uint8_t    ENDPOINT_TYPE_SHIFT = 3; 
+                static constexpr uint32_t   MULT_MASK                   = 0x00000300;
+                static constexpr uint8_t    MULT_SHIFT                  = 8;
+                static constexpr uint32_t   MAX_PS_STREAMS_MASK         = 0x00007C00;
+                static constexpr uint8_t    MAX_PS_STREAMS_SHIFT        = 10;
+                static constexpr uint32_t   INTERVAL_MASK               = 0x00FF0000;
+                static constexpr uint8_t    INTERVAL_SHIFT              = 16;
+                static constexpr uint32_t   CERR_MASK                   = 0x00000006;
+                static constexpr uint8_t    CERR_SHIFT                  = 1;
+                static constexpr uint32_t   ENDPOINT_TYPE_MASK          = 0x00000038;
+                static constexpr uint8_t    ENDPOINT_TYPE_SHIFT         = 3;
+                static constexpr uint32_t   MAX_PACKET_SIZE_MASK        = 0xFFFF0000;
+                static constexpr uint8_t    MAX_PACKET_SIZE_SHIFT       = 16;
+                static constexpr uint32_t   MAX_BURST_SIZE_MASK         = 0x0000FF00;
+                static constexpr uint8_t    MAX_BURST_SIZE_SHIFT        = 8;
+                static constexpr uint32_t   DCS_MASK                    = 0x00000001;
+                static constexpr uint8_t    DCS_SHIFT                   = 0;
+                static constexpr uint32_t   TR_DEQUEUE_POINTER_LO_MASK  = 0xFFFFFFF0;
 
             public:
                 EndpointState GetEndpointState() const = delete;
                 
-                uint8_t GetMult() const = delete;
-                void SetMult(uint8_t mult) = delete;
+                uint8_t GetMult() const;
+                void SetMult(uint8_t mult);
 
-                uint8_t GetMaxPStreams() const = delete;
-                void SetMaxPStreams(uint8_t streams) = delete;
+                uint8_t GetMaxPStreams() const;
+                void SetMaxPStreams(uint8_t streams);
 
                 bool GetLSA() const = delete;
                 void SetLSA(bool lsa) = delete;
 
-                uint8_t GetInterval() const = delete;
-                void SetInterval(uint8_t interval) = delete;
+                uint8_t GetInterval() const;
+                void SetInterval(uint8_t interval);
 
                 uint8_t GetMaxESITPayload() const = delete;
                 void SetMaxESITPayload(uint8_t payload) = delete;
 
-                uint8_t GetErrorCount() const = delete;
-                void SetErrorCount(uint8_t count) = delete;
+                uint8_t GetErrorCount() const;
+                void SetErrorCount(uint8_t count);
 
                 EndpointType GetEndpointType() const;
                 void SetEndpointType(const EndpointType& type);
@@ -209,17 +228,17 @@ namespace Devices {
                 bool GetHID() const = delete;
                 void SetHID(bool hid) = delete;
 
-                uint8_t GetMaxBurstSize() const = delete;
-                void SetMaxBurstSize(uint8_t size) = delete;
+                uint8_t GetMaxBurstSize() const;
+                void SetMaxBurstSize(uint8_t size);
 
-                uint16_t GetMaxPacketSize() const = delete;
-                void SetMaxPacketSize(uint16_t size) = delete;
+                uint16_t GetMaxPacketSize() const;
+                void SetMaxPacketSize(uint16_t size);
 
-                bool GetDCS() const = delete;
-                void ToggleDCS() = delete;
+                bool GetDCS() const;
+                void SetDCS(bool dcs);
 
-                uint64_t GetTRDequeuePointer() const = delete;
-                void SetTRDequeuePointer(uint64_t pointer) = delete;
+                const TransferTRB* GetTRDequeuePointer() const;
+                void SetTRDequeuePointer(const TransferTRB* pointer);
 
                 uint16_t GetAverageTRBLength() const = delete;
                 void SetAverageTRBLength(uint16_t length) = delete;
@@ -377,6 +396,7 @@ namespace Devices {
             public:
                 static Optional<TransferRing*> Create(size_t pages);
 
+                const TransferTRB* GetBase() const;
                 void Release();
                 bool GetCycle() const;
                 void Enqueue(const TransferTRB& trb);

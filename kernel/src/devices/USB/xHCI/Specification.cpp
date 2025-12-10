@@ -16,7 +16,34 @@
 
 #include <sched/Self.hpp>
 
+namespace {
+    template<typename T>
+    static constexpr T& ModifyPacked(T& target, T mask, uint8_t shift, T value) {
+        target = (target & ~mask) | ((value << shift) & mask);
+        return target;
+    }
+
+    template<typename T, typename R>
+    static constexpr T& ModifyPacked(T& target, T mask, uint8_t shift, R value) {
+        return ModifyPacked<T>(target, mask, shift, static_cast<T>(value));
+    }
+
+    template<typename T>
+    static constexpr T GetPacked(const T& source, T mask, uint8_t shift) {
+        return (source & mask) >> shift;
+    }
+
+    template<typename T, typename R>
+    static constexpr R GetPacked(const T& source, T mask, uint8_t shift) {
+        return static_cast<R>(GetPacked<T>(source, mask, shift));
+    }
+}
+
 namespace Devices::USB::xHCI {
+    PortSpeed::operator decltype(InvalidSpeed)() const {
+        return value;
+    }
+
     PortSpeed PortSpeed::FromSpeedID(uint8_t id) {
         switch (id) {
             case 1: return PortSpeed { FullSpeed };
@@ -31,14 +58,16 @@ namespace Devices::USB::xHCI {
     }
 
     uint8_t PortSpeed::ToSpeedID() const {
-        if (*this == FullSpeed) return 1;
-        else if (*this == LowSpeed) return 2;
-        else if (*this == HighSpeed) return 3;
-        else if (*this == SuperSpeedGen1x1) return 4;
-        else if (*this == SuperSpeedPlusGen2x1) return 5;
-        else if (*this == SuperSpeedPlusGen1x2) return 6;
-        else if (*this == SuperSpeedPlusGen2x2) return 7;
-        else return 0;
+        switch (*this) {
+            case FullSpeed: return 1;
+            case LowSpeed: return 2;
+            case HighSpeed: return 3;
+            case SuperSpeedGen1x1: return 4;
+            case SuperSpeedPlusGen2x1: return 5;
+            case SuperSpeedPlusGen1x2: return 6;
+            case SuperSpeedPlusGen2x2: return 7;
+            default: return 0;
+        }
     }
 
     bool PortSpeed::operator==(const decltype(InvalidSpeed)& speed) const {
@@ -79,35 +108,35 @@ namespace Devices::USB::xHCI {
     }
 
     uint32_t SlotContext::GetRouteString() const {
-        return data[0] & ROUTE_STRING_MASK;
+        return GetPacked(data[0], ROUTE_STRING_MASK, 0);
     }
 
     void SlotContext::SetRouteString(uint32_t route_string) {
-        data[0] = (data[0] & ~ROUTE_STRING_MASK) | (route_string & ROUTE_STRING_MASK); 
+        data[0] = ModifyPacked(data[0], ROUTE_STRING_MASK, 0, route_string);
     }
 
     PortSpeed SlotContext::GetPortSpeed() const {
-        return PortSpeed::FromSpeedID((data[0] & PORT_SPEED_MASK) >> PORT_SPEED_SHIFT);
+        return PortSpeed::FromSpeedID(GetPacked<uint32_t, uint8_t>(data[0], PORT_SPEED_MASK, PORT_SPEED_SHIFT));
     }
 
     void SlotContext::SetPortSpeed(const PortSpeed& speed) {
-        data[0] = (data[0] & ~PORT_SPEED_MASK) | ((static_cast<uint32_t>(speed.ToSpeedID()) << PORT_SPEED_SHIFT) & PORT_SPEED_MASK);
+        data[0] = ModifyPacked(data[0], PORT_SPEED_MASK, PORT_SPEED_SHIFT, speed.ToSpeedID());
     }
 
     uint8_t SlotContext::GetContextEntries() const {
-        return static_cast<uint8_t>((data[0] & CONTEXT_ENTRIES_MASK) >> CONTEXT_ENTRIES_SHIFT);
+        return GetPacked<uint32_t, uint8_t>(data[0], CONTEXT_ENTRIES_MASK, CONTEXT_ENTRIES_SHIFT);
     }
 
     void SlotContext::SetContextEntries(uint8_t count) {
-        data[0] = (data[0] & ~CONTEXT_ENTRIES_MASK) | ((static_cast<uint32_t>(count) << CONTEXT_ENTRIES_SHIFT) & CONTEXT_ENTRIES_MASK);
+        data[0] = ModifyPacked(data[0], CONTEXT_ENTRIES_MASK, CONTEXT_ENTRIES_SHIFT, count);
     }
 
     uint8_t SlotContext::GetRootHubPort() const {
-        return static_cast<uint8_t>((data[1] & ROOT_HUB_PORT_MASK) >> ROOT_HUB_PORT_SHIFT);
+        return GetPacked<uint32_t, uint8_t>(data[1], ROOT_HUB_PORT_MASK, ROOT_HUB_PORT_SHIFT);
     }
 
     void SlotContext::SetRootHubPort(uint8_t port) {
-        data[1] = (data[1] & ~ROOT_HUB_PORT_MASK) | ((static_cast<uint32_t>(port) << ROOT_HUB_PORT_SHIFT) & ROOT_HUB_PORT_MASK);
+        data[1] = ModifyPacked(data[1], ROOT_HUB_PORT_MASK, ROOT_HUB_PORT_SHIFT, port);
     }
 
     EndpointState EndpointState::FromEndpointState(uint8_t state) {
@@ -136,6 +165,10 @@ namespace Devices::USB::xHCI {
         value = type;
     }
 
+    EndpointType::operator decltype(Invalid) () const {
+        return value;
+    }
+
     EndpointType EndpointType::FromEndpointType(uint8_t type) {
         switch (type) {
             case 0: return EndpointType { Invalid };
@@ -151,15 +184,17 @@ namespace Devices::USB::xHCI {
     }
 
     uint8_t EndpointType::ToEndpointType() const {
-        if (*this == Invalid) return 0;
-        else if (*this == IsochronousOut) return 1;
-        else if (*this == BulkOut) return 2;
-        else if (*this == InterruptOut) return 3;
-        else if (*this == ControlBidirectional) return 4;
-        else if (*this == IsochronousIn) return 5;
-        else if (*this == BulkIn) return 6;
-        else if (*this == InterruptIn) return 7;
-        else return 0;
+        switch (*this) {
+            case Invalid: return 0;
+            case IsochronousOut: return 1;
+            case BulkOut: return 2;
+            case InterruptOut: return 3;
+            case ControlBidirectional: return 4;
+            case IsochronousIn: return 5;
+            case BulkIn: return 6;
+            case InterruptIn: return 7;
+            default: return 0;
+        }
     }
 
     bool EndpointType::operator==(const decltype(Invalid)& type) const {
@@ -170,13 +205,84 @@ namespace Devices::USB::xHCI {
         return value != type;
     }
 
+    uint8_t EndpointContext::GetMult() const {
+        return GetPacked<uint32_t, uint8_t>(data[0], MULT_MASK, MULT_SHIFT);
+    }
+
+    void EndpointContext::SetMult(uint8_t mult) {
+        data[0] = ModifyPacked(data[0], MULT_MASK, MULT_SHIFT, mult);
+    }
+
+    uint8_t EndpointContext::GetMaxPStreams() const {
+        return GetPacked<uint32_t, uint8_t>(data[0], MAX_PS_STREAMS_MASK, MAX_PS_STREAMS_SHIFT);
+    }
+
+    void EndpointContext::SetMaxPStreams(uint8_t streams) {
+        data[0] = ModifyPacked(data[0], MAX_PS_STREAMS_MASK, MAX_PS_STREAMS_SHIFT, streams);
+    }
+
+    uint8_t EndpointContext::GetInterval() const {
+        return GetPacked<uint32_t, uint8_t>(data[0], INTERVAL_MASK, INTERVAL_SHIFT);
+    }
+
+    void EndpointContext::SetInterval(uint8_t interval) {
+        data[0] = ModifyPacked(data[0], INTERVAL_MASK, INTERVAL_SHIFT, interval);
+    }
+
+    uint8_t EndpointContext::GetErrorCount() const {
+        return GetPacked<uint32_t, uint8_t>(data[1], CERR_MASK, CERR_SHIFT);
+    }
+
+    void EndpointContext::SetErrorCount(uint8_t count) {
+        data[1] = ModifyPacked<uint32_t, uint8_t>(data[1], CERR_MASK, CERR_SHIFT, count);
+    }
+
     EndpointType EndpointContext::GetEndpointType() const {
-        const uint8_t type = static_cast<uint8_t>((data[1] & ENDPOINT_TYPE_MASK) >> ENDPOINT_TYPE_SHIFT);
-        return EndpointType::FromEndpointType(type);
+        return EndpointType::FromEndpointType(
+            GetPacked<uint32_t, uint8_t>(data[1], ENDPOINT_TYPE_MASK, ENDPOINT_TYPE_SHIFT)
+        );
     }
 
     void EndpointContext::SetEndpointType(const EndpointType& type) {
-        data[1] = (data[1] & ~ENDPOINT_TYPE_MASK) | ((static_cast<uint32_t>(type.ToEndpointType()) << ENDPOINT_TYPE_SHIFT) & ENDPOINT_TYPE_MASK);
+        data[1] = ModifyPacked(data[1], ENDPOINT_TYPE_MASK, ENDPOINT_TYPE_SHIFT, type.ToEndpointType());
+    }
+
+    uint8_t EndpointContext::GetMaxBurstSize() const {
+        return GetPacked<uint32_t, uint8_t>(data[1], MAX_BURST_SIZE_MASK, MAX_BURST_SIZE_SHIFT);
+    }
+
+    void EndpointContext::SetMaxBurstSize(uint8_t size) {
+        data[1] = ModifyPacked(data[1], MAX_BURST_SIZE_MASK, MAX_BURST_SIZE_SHIFT, size);
+    }
+
+    uint16_t EndpointContext::GetMaxPacketSize() const {
+        return GetPacked<uint32_t, uint16_t>(data[1], MAX_PACKET_SIZE_MASK, MAX_PACKET_SIZE_SHIFT);
+    }
+
+    void EndpointContext::SetMaxPacketSize(uint16_t size) {
+        data[1] = ModifyPacked(data[1], MAX_PACKET_SIZE_MASK, MAX_PACKET_SIZE_SHIFT, size);
+    }
+
+    bool EndpointContext::GetDCS() const {
+        return GetPacked<uint32_t, bool>(data[2], DCS_MASK, DCS_SHIFT);
+    }
+
+    void EndpointContext::SetDCS(bool dcs) {
+        data[2] = ModifyPacked<uint32_t, bool>(data[2], DCS_MASK, DCS_SHIFT, dcs);
+    }
+
+    const TransferTRB* EndpointContext::GetTRDequeuePointer() const {
+        const uint64_t pointer_lo = static_cast<uint64_t>(data[2] & TR_DEQUEUE_POINTER_LO_MASK);
+        const uint64_t pointer_hi = static_cast<uint64_t>(data[3]);
+        return reinterpret_cast<TransferTRB*>((pointer_hi << 32) | pointer_lo);
+    }
+
+    void EndpointContext::SetTRDequeuePointer(const TransferTRB* pointer) {
+        const uint64_t address = reinterpret_cast<uint64_t>(pointer);
+        const uint32_t address_lo = static_cast<uint32_t>(address) & TR_DEQUEUE_POINTER_LO_MASK;
+        const uint32_t address_hi = static_cast<uint32_t>((address >> 32));
+        data[2] = ModifyPacked(data[2], TR_DEQUEUE_POINTER_LO_MASK, 0, address_lo);
+        data[3] = address_hi;
     }
 
     void InputControlContext::SetDropContext(uint8_t id) {
@@ -199,15 +305,13 @@ namespace Devices::USB::xHCI {
     void InputControlContext::SetInterfaceNumber(uint8_t id) {
         static constexpr uint32_t INTERFACE_NUMBER_MASK = 0x0000FF00;
         static constexpr uint8_t INTERFACE_NUMBER_SHIFT = 8;
-        const uint32_t extended_interface_number = static_cast<uint32_t>(id) << INTERFACE_NUMBER_SHIFT;
-        data[7] = (data[7] & ~INTERFACE_NUMBER_MASK) | (extended_interface_number & INTERFACE_NUMBER_MASK);
+        data[7] = ModifyPacked(data[7], INTERFACE_NUMBER_MASK, INTERFACE_NUMBER_SHIFT, id);
     }
 
     void InputControlContext::SetAlternateSetting(uint8_t v) {
         static constexpr uint32_t ALTERNATE_SETTING_MASK = 0x00FF0000;
         static constexpr uint8_t ALTERNATE_SETTING_SHIFT = 16;
-        const uint32_t extended_alternate_setting = static_cast<uint32_t>(v) << ALTERNATE_SETTING_SHIFT;
-        data[7] = (data[7] & ~ALTERNATE_SETTING_MASK) & (extended_alternate_setting & ALTERNATE_SETTING_MASK);
+        data[7] = ModifyPacked(data[7], ALTERNATE_SETTING_MASK, ALTERNATE_SETTING_SHIFT, v);
     }
 
     Optional<ContextWrapper*> ContextWrapper::Create(bool extended) {
@@ -475,6 +579,10 @@ namespace Devices::USB::xHCI {
         Utils::memset(ring_base, 0, allocated);
         
         return Optional<TransferRing*>(new (object_memory) TransferRing(ring_base, capacity));
+    }
+
+    const TransferTRB* TransferRing::GetBase() const {
+        return base;
     }
 
     void TransferRing::Release() {
