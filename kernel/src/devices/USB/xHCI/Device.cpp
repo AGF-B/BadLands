@@ -10,6 +10,14 @@ namespace Devices::USB::xHCI {
     Device::Device(Controller& controller, const DeviceDescriptor& descriptor)
         : controller{controller}, descriptor{descriptor} {}
 
+    const DeviceDescriptor& Device::GetDescriptor() const {
+        return descriptor;
+    }
+
+    const void* Device::GetOutputDeviceContext() const {
+        return context_wrapper->GetOutputDeviceContextAddress();
+    }
+
     Success Device::Initialize() {
         // Initialize contexts
         auto context_wrapper_result = ContextWrapper::Create(controller.HasExtendedContext());
@@ -19,8 +27,6 @@ namespace Devices::USB::xHCI {
         }
 
         context_wrapper = context_wrapper_result.GetValue();
-
-
         context_wrapper->Reset();
 
         auto* input_control_context = context_wrapper->GetInputControlContext();
@@ -43,7 +49,35 @@ namespace Devices::USB::xHCI {
 
         auto* control_endpoint_context = context_wrapper->GetControlEndpointContext(true);
 
+        // compute default control endpoint max packet size
+        uint16_t max_packet_size;
+
+        switch (descriptor.port_speed) {
+            case PortSpeed::LowSpeed: max_packet_size = 8; break;
+            case PortSpeed::FullSpeed: max_packet_size = 64; break;
+            case PortSpeed::HighSpeed: max_packet_size = 64; break;
+            case PortSpeed::SuperSpeedGen1x1:
+            case PortSpeed::SuperSpeedPlusGen1x2:
+            case PortSpeed::SuperSpeedPlusGen2x1:
+            case PortSpeed::SuperSpeedPlusGen2x2:
+                max_packet_size = 512; break;
+            default:
+                max_packet_size = 8; break;
+        }
+
         control_endpoint_context->SetEndpointType(EndpointType::ControlBidirectional);
+        control_endpoint_context->SetMaxPacketSize(max_packet_size);
+        control_endpoint_context->SetMaxBurstSize(0);
+        control_endpoint_context->SetTRDequeuePointer(control_transfer_ring->GetBase());
+        control_endpoint_context->SetDCS(control_transfer_ring->GetCycle());
+        control_endpoint_context->SetInterval(0);
+        control_endpoint_context->SetMaxPStreams(0);
+        control_endpoint_context->SetMult(0);
+        control_endpoint_context->SetErrorCount(3);
+
+        controller.LoadDeviceSlot(*this);
+
+        /// TODO: Issue Address Device command
     }
 
     void Device::Release() {

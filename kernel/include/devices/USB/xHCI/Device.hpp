@@ -31,6 +31,9 @@ namespace Devices {
             public:
                 Device(Controller& controller, const DeviceDescriptor& descriptor);
 
+                const DeviceDescriptor& GetDescriptor() const;
+                const void* GetOutputDeviceContext() const;
+
                 Success Initialize();
                 void Release();
             };

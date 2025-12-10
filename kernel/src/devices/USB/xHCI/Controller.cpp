@@ -297,7 +297,7 @@ namespace Devices::USB::xHCI {
         }
     }
 
-    void Controller::WriteDCBAAEntry(uint8_t slot, void* ptr) const {
+    void Controller::WriteDCBAAEntry(uint8_t slot, const void* ptr) const {
         if (slot <= max_slots_enabled && dcbaa != nullptr) {
             dcbaa[slot].ptr = reinterpret_cast<void*>(reinterpret_cast<uint64_t>(ptr) & ~(uint64_t)0x3F);
         }
@@ -1034,6 +1034,10 @@ namespace Devices::USB::xHCI {
     bool Controller::HasExtendedContext() const {
         static constexpr size_t EXTENDED_CONTEXT_SIZE = 64;
         return GetContextSize() == EXTENDED_CONTEXT_SIZE;
+    }
+
+    void Controller::LoadDeviceSlot(const Device& device) {
+        WriteDCBAAEntry(device.GetDescriptor().slot_id, device.GetOutputDeviceContext());
     }
 
     void Controller::Destroy() {

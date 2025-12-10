@@ -174,7 +174,7 @@ namespace Devices {
                 size_t GetDCBAAPPages() const;
                 bool ConfigureDCBAAP();
                 void ReleaseDCBAAP();
-                void WriteDCBAAEntry(uint8_t slot, void* ptr) const;
+                void WriteDCBAAEntry(uint8_t slot, const void* ptr) const;
 
                 static constexpr size_t GetCommandRingPages();
                 bool ConfigureCommandRing();
@@ -230,6 +230,8 @@ namespace Devices {
 
                 size_t GetContextSize() const;
                 bool HasExtendedContext() const;
+
+                void LoadDeviceSlot(const Device& device);
 
                 void Destroy();
             };
