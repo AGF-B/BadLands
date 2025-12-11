@@ -3,4 +3,5 @@
 build/
 simulation/disk.img
 simulation/qemu.log
+simulation/*.fd
 CMakeSettings.json
