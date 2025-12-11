@@ -9,6 +9,7 @@ qemu-system-x86_64 \
 -cpu max,host-phys-bits=on,+avx,enforce \
 -device nec-usb-xhci \
 -device usb-kbd \
+-device usb-hub \
 -rtc base=localtime \
 -net none \
 -monitor telnet:127.0.0.1:7777,server,nowait \
