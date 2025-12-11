@@ -1,5 +1,6 @@
 .vs/
 .vscode/
 build/
-simulation/
+simulation/disk.img
+simulation/qemu.log
 CMakeSettings.json
