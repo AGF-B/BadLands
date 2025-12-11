@@ -121,7 +121,6 @@ namespace Devices::USB::xHCI {
 
         Log::printfSafe("[USB] Device %u successfully addressed\r\n", descriptor.slot_id);
 
-        //__asm__ volatile("jmp .");
         return Success();
     }
 

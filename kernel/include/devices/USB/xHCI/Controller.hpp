@@ -157,7 +157,7 @@ namespace Devices {
 
                 Controller(const PCI::Interface& interface);
 
-                void HandleIRQ(void* stack, uint64_t error_code) final;
+                virtual void HandleIRQ(void* stack, uint64_t error_code) final;
 
                 void ReleaseResources();
 

@@ -133,8 +133,6 @@ namespace Devices::USB::xHCI {
 
         APIC::SendEOI();
 
-        /// TODO: Implement special methods that buffer prints
-        /// happening in interrupt handlers
         while (event->GetCycle() == event_cycle) {
             switch (event->GetType()) {
                 case EventTRB::Type::TransferEvent:
@@ -263,7 +261,7 @@ namespace Devices::USB::xHCI {
 
         const size_t dcbaa_pages = GetDCBAAPPages();
         
-        devices = static_cast<Device*>(Heap::Allocate(max_slots_enabled));
+        devices = static_cast<Device*>(Heap::Allocate(static_cast<size_t>(max_slots_enabled) * sizeof(Device)));
 
         if (devices == nullptr) {
             return false;
@@ -882,7 +880,7 @@ namespace Devices::USB::xHCI {
             | (1 << 3)
             | (1 << 2);
         
-        // // Use edge, lowest priority, 0x42 int vector
+        // // Use edge, lowest priority
         const uint16_t MD =
             (0 << 15)
             | (1 << 8)
