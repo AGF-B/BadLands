@@ -152,6 +152,7 @@ namespace Devices::USB::xHCI {
     LinkTRB LinkTRB::Create(bool cycle, TRB* next) {
         static constexpr uint8_t LINK_TYPE = 6;
         static constexpr uint64_t NEXT_MASK = 0xFFFFFFFFFFFFFFF0;
+        static constexpr uint32_t TOGGLE_CYCLE_FLAG = 0x00000002;
 
         const uint64_t raw_next = reinterpret_cast<uint64_t>(next) & NEXT_MASK;
 
@@ -160,7 +161,7 @@ namespace Devices::USB::xHCI {
         trb.data[0] = static_cast<uint32_t>(raw_next);
         trb.data[1] = static_cast<uint32_t>(raw_next >> 32);
         trb.data[2] = 0;
-        trb.data[3] = 0;
+        trb.data[3] = TOGGLE_CYCLE_FLAG;
 
         trb.SetCycle(cycle);
         trb.SetTRBType(LINK_TYPE);
