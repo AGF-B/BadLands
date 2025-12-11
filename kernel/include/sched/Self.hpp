@@ -47,6 +47,7 @@ private:
 
     static inline UnattachedSelf* processors = nullptr;
     static inline size_t processor_count = 0;
+    static inline size_t allocated_processors = 0;
 
     bool enabled{false};
     bool online_capable{false};
@@ -61,6 +62,7 @@ public:
     UnattachedSelf(uint8_t apic_id, uint8_t apic_uid, bool enabled, bool online_capable);
 
     static UnattachedSelf* AllocateProcessors(size_t count);
+    static UnattachedSelf& AllocateRemote();
     static UnattachedSelf& AccessRemote(uint8_t id);
     static UnattachedSelf& Attach();
 

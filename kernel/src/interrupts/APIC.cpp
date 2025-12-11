@@ -506,9 +506,9 @@ namespace APIC {
 					}
 
 					// initialize remote self structure
-					new (&UnattachedSelf::AccessRemote(ptr->APIC_ID)) UnattachedSelf(
-						ptr->APIC_ID,
-						ptr->ACPI_Processor_UID,
+					new (&UnattachedSelf::AllocateRemote()) UnattachedSelf(
+						lapic.ID,
+						lapic.UID,
 						isOnline,
 						isOnlineCapable
 					);

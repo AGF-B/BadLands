@@ -189,12 +189,22 @@ UnattachedSelf* UnattachedSelf::AllocateProcessors(size_t count) {
     return processors;
 }
 
-UnattachedSelf& UnattachedSelf::AccessRemote(uint8_t id) {
-    if (id >= processor_count) {
-        Panic::Panic("ILLEGAL ACCESS TO INVALID REMOTE PROCESSOR\n\r");
+UnattachedSelf& UnattachedSelf::AllocateRemote() {
+    if (allocated_processors >= processor_count) {
+        Panic::Panic("ILLEGAL ALLOCATION OF REMOTE PROCESSOR\n\r");
     }
 
-    return processors[id];
+    return processors[allocated_processors++];
+}
+
+UnattachedSelf& UnattachedSelf::AccessRemote(uint8_t id) {
+    for (size_t i = 0; i < processor_count; i++) {
+        if (processors[i].apic_id == id) {
+            return processors[i];
+        }
+    }
+
+    Panic::Panic("ILLEGAL ACCESS TO INVALID REMOTE PROCESSOR\n\r");
 }
 
 UnattachedSelf& UnattachedSelf::Attach() {
