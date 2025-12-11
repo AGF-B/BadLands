@@ -6,6 +6,8 @@
 #include <devices/USB/xHCI/Device.hpp>
 #include <devices/USB/xHCI/Specification.hpp>
 
+#include <screen/Log.hpp>
+
 namespace Devices::USB::xHCI {
     Device::Device(Controller& controller, const DeviceDescriptor& descriptor)
         : controller{controller}, descriptor{descriptor} {}
@@ -19,10 +21,13 @@ namespace Devices::USB::xHCI {
     }
 
     Success Device::Initialize() {
+        Log::printfSafe("[USB] Initializing device %u\r\n", descriptor.slot_id);
+        
         // Initialize contexts
         auto context_wrapper_result = ContextWrapper::Create(controller.HasExtendedContext());
 
         if (!context_wrapper_result.HasValue()) {
+            Log::printfSafe("[USB] Failed to create context wrapper for device %u\r\n", descriptor.slot_id);
             return Failure();
         }
 
@@ -41,6 +46,7 @@ namespace Devices::USB::xHCI {
         // Initialize transfer ring for control endpoint
         auto transfer_ring_result = TransferRing::Create(1);
         if (!transfer_ring_result.HasValue()) {
+            Log::printfSafe("[USB] Failed to create control transfer ring for device %u\r\n", descriptor.slot_id);
             Release();
             return Failure();
         }
@@ -77,7 +83,46 @@ namespace Devices::USB::xHCI {
 
         controller.LoadDeviceSlot(*this);
 
-        /// TODO: Issue Address Device command
+        const auto command_legacy = AddressDeviceTRB::Create(
+            controller.GetCommandCycle(),
+            true,
+            descriptor.slot_id,
+            context_wrapper->GetInputDeviceContextAddress()
+        );
+
+        const auto command = AddressDeviceTRB::Create(
+            controller.GetCommandCycle(),
+            false,
+            descriptor.slot_id,
+            context_wrapper->GetInputDeviceContextAddress()
+        );
+
+        auto result = controller.SendCommand(command_legacy);
+
+        if (!result.HasValue() || result.GetValue().GetCompletionCode() != TRB::CompletionCode::Success) {
+            Log::printfSafe("[USB] Legacy addressing failed for device %u, trying non-legacy method\r\n", descriptor.slot_id);
+            result = controller.SendCommand(command);
+
+            if (!result.HasValue() || result.GetValue().GetCompletionCode() != TRB::CompletionCode::Success) {
+                Log::printfSafe("[USB] Addressing failed for device %u\r\n", descriptor.slot_id);
+                Release();
+                return Failure();
+            }
+        }
+        else {
+            result = controller.SendCommand(command);
+
+            if (!result.HasValue() || result.GetValue().GetCompletionCode() != TRB::CompletionCode::Success) {
+                Log::printfSafe("[USB] Addressing failed for device %u\r\n", descriptor.slot_id);
+                Release();
+                return Failure();
+            }
+        }
+
+        Log::printfSafe("[USB] Device %u successfully addressed\r\n", descriptor.slot_id);
+
+        //__asm__ volatile("jmp .");
+        return Success();
     }
 
     void Device::Release() {

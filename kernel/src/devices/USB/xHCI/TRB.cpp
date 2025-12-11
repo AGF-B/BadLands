@@ -87,6 +87,14 @@ namespace Devices::USB::xHCI {
         data[3] |= extended_type << SHIFT;
     }
 
+    void CommandTRB::SetSlotID(uint8_t id) {
+        static constexpr uint8_t SHIFT = 24;
+        static constexpr uint32_t MASK = 0xFF000000;
+
+        const uint32_t extended_id = (static_cast<uint32_t>(id) << SHIFT) & MASK;
+        data[3] |= extended_id;
+    }
+
     NoOpTRB NoOpTRB::Create(bool cycle) {
         static constexpr uint8_t NO_OP_TYPE = 23;
 
@@ -116,6 +124,27 @@ namespace Devices::USB::xHCI {
         trb.SetCycle(cycle);
         trb.SetTRBType(ENABLE_SLOT_TYPE);
         trb.SetSlotType(slot_type);
+
+        return trb;
+    }
+
+    AddressDeviceTRB AddressDeviceTRB::Create(bool cycle, bool bsr, uint8_t slot_id, const void* context_pointer) {
+        static constexpr uint8_t    ADDRESS_DEVICE_TYPE     = 11;
+        static constexpr uint64_t   CONTEXT_POINTER_MASK    = 0xFFFFFFFFFFFFFFF0;
+        static constexpr uint32_t   BSR_FLAG                = 0x00000200; 
+
+        const uint64_t raw_pointer = reinterpret_cast<uint64_t>(context_pointer) & CONTEXT_POINTER_MASK;
+
+        AddressDeviceTRB trb;
+
+        trb.data[0] = static_cast<uint32_t>(raw_pointer);
+        trb.data[1] = static_cast<uint32_t>(raw_pointer >> 32);
+        trb.data[2] = 0;
+        trb.data[3] = bsr ? BSR_FLAG : 0;
+
+        trb.SetCycle(cycle);
+        trb.SetTRBType(ADDRESS_DEVICE_TYPE);
+        trb.SetSlotID(slot_id);
 
         return trb;
     }

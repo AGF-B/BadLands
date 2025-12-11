@@ -101,6 +101,7 @@ namespace Devices {
                 void SetCycle(bool cycle);
                 void SetTRBType(uint8_t type);
                 void SetSlotType(uint8_t type);
+                void SetSlotID(uint8_t id);
             };
 
             struct NoOpTRB : public CommandTRB {
@@ -109,6 +110,10 @@ namespace Devices {
 
             struct EnableSlotTRB : public CommandTRB {
                 static EnableSlotTRB Create(bool cycle, uint8_t slot_type);
+            };
+
+            struct AddressDeviceTRB : public CommandTRB {
+                static AddressDeviceTRB Create(bool cycle, bool bsr, uint8_t slot_id, const void* context_pointer);
             };
 
             struct LinkTRB : public CommandTRB {
