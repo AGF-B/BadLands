@@ -679,6 +679,8 @@ namespace Devices::USB::xHCI {
 
                         if (!devices[slot_id - 1].Initialize().IsSuccess()) {
                             Log::printfSafe("[xHCI] Failed to initialize device on port 0x%0.2hhx\n\r", i);
+                            DisableSlot(ports[i].slot);
+                            ports[i].slot = 0;
                         }
                     }
                 }
