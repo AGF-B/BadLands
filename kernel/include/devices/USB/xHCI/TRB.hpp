@@ -49,6 +49,8 @@ namespace Devices {
 
                 uint8_t GetSlotType() const;
                 bool GetCycle() const;
+                void SetCycle(bool cycle);
+                void SetTRBType(uint8_t type);
             };
 
             struct EventTRB : public TRB {
@@ -98,8 +100,8 @@ namespace Devices {
 
             struct CommandTRB : public TRB {
             protected:
-                void SetCycle(bool cycle);
-                void SetTRBType(uint8_t type);
+                using TRB::SetCycle;
+                using TRB::SetTRBType;
                 void SetSlotType(uint8_t type);
                 void SetSlotID(uint8_t id);
             };
@@ -121,7 +123,21 @@ namespace Devices {
             };
 
             struct TransferTRB : public TRB {
-
+            protected:
+                void SetDataBufferPointer(const void* pointer);
+                void SetRawImmediateData(uint64_t data);
+                void SetTRBTransferLength(uint16_t length);
+                void SetTDSize(uint8_t size);
+                void SetInterrupterTarget(uint16_t target);
+                using TRB::SetCycle;
+                void SetENT(bool ent);
+                void SetISP(bool isp);
+                void SetNoSnoop(bool no_snoop);
+                void SetChain(bool chain);
+                void SetInterruptOnCompletion(bool ioc);
+                void SetImmediateData(bool immediate_data);
+                void SetBEI(bool bei);
+                using TRB::SetTRBType;
             };
         }
     }

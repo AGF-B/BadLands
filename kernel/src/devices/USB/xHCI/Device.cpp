@@ -9,6 +9,61 @@
 #include <screen/Log.hpp>
 
 namespace Devices::USB::xHCI {
+    Optional<uint16_t> Device::GetDefaultMaxPacketSize() const {
+        switch (descriptor.port_speed) {
+            case PortSpeed::LowSpeed: return Optional<uint16_t>(8); break;
+            case PortSpeed::FullSpeed: return Optional<uint16_t>(64); break;
+            case PortSpeed::HighSpeed: return Optional<uint16_t>(64); break;
+            case PortSpeed::SuperSpeedGen1x1:
+            case PortSpeed::SuperSpeedPlusGen1x2:
+            case PortSpeed::SuperSpeedPlusGen2x1:
+            case PortSpeed::SuperSpeedPlusGen2x2:
+                return Optional<uint16_t>(512); break;
+            default:
+                return Optional<uint16_t>(); break;
+        }
+    }
+
+    Success Device::AddressDevice() {
+        controller.LoadDeviceSlot(*this);
+
+        const auto command_legacy = AddressDeviceTRB::Create(
+            controller.GetCommandCycle(),
+            true,
+            descriptor.slot_id,
+            context_wrapper->GetInputDeviceContextAddress()
+        );
+
+        const auto command = AddressDeviceTRB::Create(
+            controller.GetCommandCycle(),
+            false,
+            descriptor.slot_id,
+            context_wrapper->GetInputDeviceContextAddress()
+        );
+
+        auto result = controller.SendCommand(command_legacy);
+
+        if (!result.HasValue() || result.GetValue().GetCompletionCode() != TRB::CompletionCode::Success) {
+            Log::printfSafe("[USB] Legacy addressing failed for device %u, trying non-legacy method\r\n", descriptor.slot_id);
+            result = controller.SendCommand(command);
+
+            if (!result.HasValue() || result.GetValue().GetCompletionCode() != TRB::CompletionCode::Success) {
+                Release();
+                return Failure();
+            }
+        }
+        else {
+            result = controller.SendCommand(command);
+
+            if (!result.HasValue() || result.GetValue().GetCompletionCode() != TRB::CompletionCode::Success) {
+                Release();
+                return Failure();
+            }
+        }
+
+        Log::printfSafe("[USB] Device %u successfully addressed\r\n", descriptor.slot_id);
+    }
+
     Device::Device(Controller& controller, const DeviceDescriptor& descriptor)
         : controller{controller}, descriptor{descriptor} {}
 
@@ -55,24 +110,16 @@ namespace Devices::USB::xHCI {
 
         auto* control_endpoint_context = context_wrapper->GetControlEndpointContext(true);
 
-        // compute default control endpoint max packet size
-        uint16_t max_packet_size;
-
-        switch (descriptor.port_speed) {
-            case PortSpeed::LowSpeed: max_packet_size = 8; break;
-            case PortSpeed::FullSpeed: max_packet_size = 64; break;
-            case PortSpeed::HighSpeed: max_packet_size = 64; break;
-            case PortSpeed::SuperSpeedGen1x1:
-            case PortSpeed::SuperSpeedPlusGen1x2:
-            case PortSpeed::SuperSpeedPlusGen2x1:
-            case PortSpeed::SuperSpeedPlusGen2x2:
-                max_packet_size = 512; break;
-            default:
-                max_packet_size = 8; break;
+        // Compute default control endpoint max packet size
+        auto max_packet_size = GetDefaultMaxPacketSize();
+        if (!max_packet_size.HasValue()) {
+            Log::printfSafe("[USB] Failed to determine default max packet size for device %u\r\n", descriptor.slot_id);
+            Release();
+            return Failure();
         }
 
         control_endpoint_context->SetEndpointType(EndpointType::ControlBidirectional);
-        control_endpoint_context->SetMaxPacketSize(max_packet_size);
+        control_endpoint_context->SetMaxPacketSize(max_packet_size.GetValue());
         control_endpoint_context->SetMaxBurstSize(0);
         control_endpoint_context->SetTRDequeuePointer(control_transfer_ring->GetBase());
         control_endpoint_context->SetDCS(control_transfer_ring->GetCycle());
@@ -81,45 +128,16 @@ namespace Devices::USB::xHCI {
         control_endpoint_context->SetMult(0);
         control_endpoint_context->SetErrorCount(3);
 
-        controller.LoadDeviceSlot(*this);
-
-        const auto command_legacy = AddressDeviceTRB::Create(
-            controller.GetCommandCycle(),
-            true,
-            descriptor.slot_id,
-            context_wrapper->GetInputDeviceContextAddress()
-        );
-
-        const auto command = AddressDeviceTRB::Create(
-            controller.GetCommandCycle(),
-            false,
-            descriptor.slot_id,
-            context_wrapper->GetInputDeviceContextAddress()
-        );
-
-        auto result = controller.SendCommand(command_legacy);
-
-        if (!result.HasValue() || result.GetValue().GetCompletionCode() != TRB::CompletionCode::Success) {
-            Log::printfSafe("[USB] Legacy addressing failed for device %u, trying non-legacy method\r\n", descriptor.slot_id);
-            result = controller.SendCommand(command);
-
-            if (!result.HasValue() || result.GetValue().GetCompletionCode() != TRB::CompletionCode::Success) {
-                Log::printfSafe("[USB] Addressing failed for device %u\r\n", descriptor.slot_id);
-                Release();
-                return Failure();
-            }
-        }
-        else {
-            result = controller.SendCommand(command);
-
-            if (!result.HasValue() || result.GetValue().GetCompletionCode() != TRB::CompletionCode::Success) {
-                Log::printfSafe("[USB] Addressing failed for device %u\r\n", descriptor.slot_id);
-                Release();
-                return Failure();
-            }
+        if (!AddressDevice().IsSuccess()) {
+            Log::printfSafe("[USB] Addressing failed for device %u\r\n", descriptor.slot_id);
+            Release();
+            return Failure();
         }
 
-        Log::printfSafe("[USB] Device %u successfully addressed\r\n", descriptor.slot_id);
+        // Get device descriptor
+
+
+        __asm__ volatile("jmp .");
 
         return Success();
     }

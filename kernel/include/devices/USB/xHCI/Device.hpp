@@ -28,6 +28,9 @@ namespace Devices {
                 ContextWrapper* context_wrapper = nullptr;
                 TransferRing* control_transfer_ring = nullptr;
 
+                Optional<uint16_t> GetDefaultMaxPacketSize() const;
+                Success AddressDevice();
+
             public:
                 Device(Controller& controller, const DeviceDescriptor& descriptor);
 

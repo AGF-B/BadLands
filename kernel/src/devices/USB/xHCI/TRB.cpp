@@ -1,5 +1,7 @@
 #include <cstdint>
 
+#include <shared/Bitwise.hpp>
+
 #include <devices/USB/xHCI/TRB.hpp>
 
 namespace Devices::USB::xHCI {
@@ -13,17 +15,28 @@ namespace Devices::USB::xHCI {
         return (data[3] & 0x00000001) != 0;
     }
 
+    void TRB::SetCycle(bool cycle) {
+        static constexpr uint32_t MASK = 0x00000001;
+        data[3] = ModifyPacked(data[3], MASK, 0, cycle ? 1U : 0U);
+    }
+
+    void TRB::SetTRBType(uint8_t type) {
+        static constexpr uint8_t SHIFT = 10;
+        static constexpr uint32_t MASK = 0x0000FC00;
+        data[3] = ModifyPacked(data[3], MASK, SHIFT, type);
+    }
+
 
     TRB::CompletionCode EventTRB::GetCompletionCode() const {
         static constexpr uint8_t SHIFT = 24;
-        static constexpr uint32_t MASK = 0x000000FF;
-        return static_cast<CompletionCode>((data[2] >> SHIFT) & MASK);
+        static constexpr uint32_t MASK = 0xFF000000;
+        return static_cast<CompletionCode>(GetPacked(data[2], MASK, SHIFT));
     }
 
     EventTRB::Type EventTRB::GetType() const {
         static constexpr uint8_t SHIFT = 10;
-        static constexpr uint32_t MASK = 0x0000003F;
-        return static_cast<Type>((data[3] >> SHIFT) & MASK);
+        static constexpr uint32_t MASK = 0x0000FC00;
+        return static_cast<Type>(GetPacked(data[3], MASK, SHIFT));
     }
 
     uint64_t EventTRB::GetEventData() const {
@@ -36,63 +49,51 @@ namespace Devices::USB::xHCI {
 
     uint32_t EventTRB::GetEventParameter() const {
         static constexpr uint32_t MASK = 0x00FFFFFF;
-        return data[2] & MASK;
+        return GetPacked(data[2], MASK, 0);
     }
 
     uint8_t EventTRB::GetVFID() const {
         static constexpr uint8_t SHIFT = 16;
-        return static_cast<uint8_t>(data[3] >> SHIFT);
+        static constexpr uint32_t MASK = 0x00FF0000;
+        return GetPacked(data[3], MASK, SHIFT);
     }
 
     uint8_t EventTRB::GetSlotID() const {
         static constexpr uint8_t SHIFT = 24;
-        return static_cast<uint8_t>(data[3] >> SHIFT);
+        static constexpr uint32_t MASK = 0xFF000000;
+        return static_cast<uint8_t>(GetPacked(data[3], MASK, SHIFT));
     }
 
 
     bool TransferEventTRB::GetEventDataPresent() const {
         static constexpr uint32_t MASK = 0x00000004;
-        return (data[3] & MASK) != 0;
+        static constexpr uint8_t SHIFT = 2;
+        return GetPacked(data[3], MASK, SHIFT) != 0;
     }
 
     uint8_t TransferEventTRB::GetEndpointID() const {
         static constexpr uint8_t SHIFT = 16;
-        static constexpr uint32_t MASK = 0x0000001F;
-        return static_cast<uint8_t>((data[3] >> SHIFT) & MASK);
+        static constexpr uint32_t MASK = 0x001F0000;
+        return static_cast<uint8_t>(GetPacked(data[3], MASK, SHIFT));
     }
 
 
     uint8_t PortStatusChangeEventTRB::GetPortID() const {
         static constexpr uint8_t SHIFT = 24;
-        return static_cast<uint8_t>(data[0] >> SHIFT);
-    }
-
-    void CommandTRB::SetCycle(bool cycle) {
-        data[3] |= cycle ? 1 : 0;
-    }
-
-    void CommandTRB::SetTRBType(uint8_t type) {
-        static constexpr uint8_t SHIFT = 10;
-        static constexpr uint32_t MASK = 0x0000003F;
-
-        const uint32_t extended_type = static_cast<uint32_t>(type) & MASK;
-        data[3] |= extended_type << SHIFT;
+        static constexpr uint32_t MASK = 0xFF000000;
+        return static_cast<uint8_t>(GetPacked(data[0], MASK, SHIFT));
     }
 
     void CommandTRB::SetSlotType(uint8_t type) {
         static constexpr uint8_t SHIFT = 16;
-        static constexpr uint32_t MASK = 0x0000001F;
-
-        const uint32_t extended_type = static_cast<uint32_t>(type) & MASK;
-        data[3] |= extended_type << SHIFT;
+        static constexpr uint32_t MASK = 0x001F0000;
+        data[3] = ModifyPacked(data[3], MASK, SHIFT, type);
     }
 
     void CommandTRB::SetSlotID(uint8_t id) {
         static constexpr uint8_t SHIFT = 24;
         static constexpr uint32_t MASK = 0xFF000000;
-
-        const uint32_t extended_id = (static_cast<uint32_t>(id) << SHIFT) & MASK;
-        data[3] |= extended_id;
+        data[3] = ModifyPacked(data[3], MASK, SHIFT, id);
     }
 
     NoOpTRB NoOpTRB::Create(bool cycle) {
@@ -167,5 +168,24 @@ namespace Devices::USB::xHCI {
         trb.SetTRBType(LINK_TYPE);
 
         return trb;
+    }
+
+    void TransferTRB::SetDataBufferPointer(const void* pointer) {
+        const uint64_t raw_pointer = reinterpret_cast<uint64_t>(pointer);
+        SetRawImmediateData(raw_pointer);
+    }
+
+    void TransferTRB::SetRawImmediateData(uint64_t data_value) {
+        const uint32_t lo = static_cast<uint32_t>(data_value);
+        const uint32_t hi = static_cast<uint32_t>(data_value >> 32);
+
+        data[0] = lo;
+        data[1] = hi;
+    }
+
+    void TransferTRB::SetTRBTransferLength(uint16_t length) {
+        static constexpr uint8_t SHIFT = 0;
+        static constexpr uint32_t MASK = 0x0000FFFF;
+        data[2] = ModifyPacked(data[2], MASK, SHIFT, length);
     }
 }

@@ -2,6 +2,7 @@
 
 #include <new>
 
+#include <shared/Bitwise.hpp>
 #include <shared/Lock.hpp>
 #include <shared/LockGuard.hpp>
 #include <shared/Response.hpp>
@@ -15,29 +16,6 @@
 #include <mm/VirtualMemory.hpp>
 
 #include <sched/Self.hpp>
-
-namespace {
-    template<typename T>
-    static constexpr T& ModifyPacked(T& target, T mask, uint8_t shift, T value) {
-        target = (target & ~mask) | ((value << shift) & mask);
-        return target;
-    }
-
-    template<typename T, typename R>
-    static constexpr T& ModifyPacked(T& target, T mask, uint8_t shift, R value) {
-        return ModifyPacked<T>(target, mask, shift, static_cast<T>(value));
-    }
-
-    template<typename T>
-    static constexpr T GetPacked(const T& source, T mask, uint8_t shift) {
-        return (source & mask) >> shift;
-    }
-
-    template<typename T, typename R>
-    static constexpr R GetPacked(const T& source, T mask, uint8_t shift) {
-        return static_cast<R>(GetPacked<T>(source, mask, shift));
-    }
-}
 
 namespace Devices::USB::xHCI {
     PortSpeed::operator decltype(InvalidSpeed)() const {
