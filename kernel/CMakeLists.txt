@@ -23,6 +23,13 @@ add_library(KERNEL_SVC STATIC
     "src/services/shell/entry.cpp"
 )
 
+add_library(xHCI_USB STATIC
+    "src/devices/USB/xHCI/Controller.cpp"
+    "src/devices/USB/xHCI/Device.cpp"
+    "src/devices/USB/xHCI/Specification.cpp"
+    "src/devices/USB/xHCI/TRB.cpp"
+)
+
 add_executable(KERNEL_IMG
     "src/acpi/Interface.cpp"
     "src/devices/KeyboardDispatcher/Converter.cpp"
@@ -30,10 +37,6 @@ add_executable(KERNEL_IMG
     "src/devices/PS2/Keyboard.cpp"
     "src/devices/PS2/KeyboardEvent.cpp"
     "src/devices/PS2/Keypoints.cpp"
-    "src/devices/USB/xHCI/Controller.cpp"
-    "src/devices/USB/xHCI/Device.cpp"
-    "src/devices/USB/xHCI/Specification.cpp"
-    "src/devices/USB/xHCI/TRB.cpp"
     "src/fs/IFNode.cpp"
     "src/fs/NPFS.cpp"
     "src/fs/VFS.cpp"
@@ -71,6 +74,8 @@ target_include_directories(KERNEL_IMG_C PRIVATE include)
 target_include_directories(KERNEL_IMG_C PRIVATE ../common/include)
 target_include_directories(KERNEL_SVC PRIVATE include)
 target_include_directories(KERNEL_SVC PRIVATE ../common/include)
+target_include_directories(xHCI_USB PRIVATE include)
+target_include_directories(xHCI_USB PRIVATE ../common/include)
 
 target_compile_options(KERNEL_IMG PRIVATE
     -mabi=ms
@@ -129,12 +134,30 @@ target_compile_options(KERNEL_SVC PRIVATE
     -flto
     -fno-stack-protector
 )
+target_compile_options(xHCI_USB PRIVATE
+    -mabi=ms
+    -Wall
+    -Wextra
+    -fms-extensions
+    -mno-red-zone
+    -ffreestanding
+    -nostdlib
+    -nolibc
+    -mgeneral-regs-only
+    -D__EFI_STANDALONE__
+    -fno-pie
+    -mcmodel=large
+    -static
+    -fno-exceptions
+    -fno-rtti
+    -flto
+    -fno-stack-protector
+)
 
 target_link_options(KERNEL_IMG PRIVATE
     -Wl,-e,KernelEntry
     -Wl,-T,../../kernel/linker.ld
     -Wl,--build-id=none
-    #-s
     -z noexecstack
     -nolibc
     -nostdlib
@@ -142,7 +165,6 @@ target_link_options(KERNEL_IMG PRIVATE
 )
 target_link_options(KERNEL_IMG_C PRIVATE
     -Wl,--build-id=none
-    #-s
     -z noexecstack
     -nolibc
     -nostdlib
@@ -150,7 +172,13 @@ target_link_options(KERNEL_IMG_C PRIVATE
 )
 target_link_options(KERNEL_SVC PRIVATE
     -Wl,--build-id=none
-    #-s
+    -z noexecstack
+    -nolibc
+    -nostdlib
+    -flto
+)
+target_link_options(xHCI_USB PRIVATE
+    -Wl,--build-id=none
     -z noexecstack
     -nolibc
     -nostdlib
@@ -159,5 +187,12 @@ target_link_options(KERNEL_SVC PRIVATE
 
 target_compile_features(KERNEL_IMG PRIVATE cxx_std_23)
 target_compile_features(KERNEL_SVC PRIVATE cxx_std_23)
+target_compile_features(xHCI_USB PRIVATE cxx_std_23)
 
-target_link_libraries(KERNEL_IMG PRIVATE KERNEL_IMG_ASM KERNEL_IMG_C KERNEL_SVC -static)
+target_link_libraries(KERNEL_IMG PRIVATE
+    KERNEL_IMG_ASM
+    KERNEL_IMG_C
+    KERNEL_SVC
+    xHCI_USB
+    -static
+)
