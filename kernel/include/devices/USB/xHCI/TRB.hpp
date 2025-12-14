@@ -49,8 +49,8 @@ namespace Devices {
 
                 uint8_t GetSlotType() const;
                 bool GetCycle() const;
-                void SetCycle(bool cycle);
-                void SetTRBType(uint8_t type);
+                constexpr void SetCycle(bool cycle);
+                constexpr void SetTRBType(uint8_t type);
             };
 
             struct EventTRB : public TRB {
@@ -102,8 +102,8 @@ namespace Devices {
             protected:
                 using TRB::SetCycle;
                 using TRB::SetTRBType;
-                void SetSlotType(uint8_t type);
-                void SetSlotID(uint8_t id);
+                constexpr void SetSlotType(uint8_t type);
+                constexpr void SetSlotID(uint8_t id);
             };
 
             struct NoOpTRB : public CommandTRB {
@@ -124,20 +124,99 @@ namespace Devices {
 
             struct TransferTRB : public TRB {
             protected:
-                void SetDataBufferPointer(const void* pointer);
-                void SetRawImmediateData(uint64_t data);
-                void SetTRBTransferLength(uint16_t length);
-                void SetTDSize(uint8_t size);
-                void SetInterrupterTarget(uint16_t target);
+                constexpr void SetDataBufferPointer(const void* pointer);
+                constexpr void SetRawImmediateData(uint64_t data);
+                constexpr void SetTRBTransferLength(uint32_t length);
+                constexpr void SetTDSize(uint8_t size);
+                constexpr void SetInterrupterTarget(uint16_t target);
                 using TRB::SetCycle;
-                void SetENT(bool ent);
-                void SetISP(bool isp);
-                void SetNoSnoop(bool no_snoop);
-                void SetChain(bool chain);
-                void SetInterruptOnCompletion(bool ioc);
-                void SetImmediateData(bool immediate_data);
-                void SetBEI(bool bei);
+                constexpr void SetENT(bool ent);
+                constexpr void SetISP(bool isp);
+                constexpr void SetNoSnoop(bool no_snoop);
+                constexpr void SetChain(bool chain);
+                constexpr void SetInterruptOnCompletion(bool ioc);
+                constexpr void SetImmediateData(bool immediate_data);
+                constexpr void SetBEI(bool bei);
                 using TRB::SetTRBType;
+                constexpr void SetDirection(bool direction);
+            };
+
+            class TransferType {
+            public:
+                enum : uint8_t {
+                    Invalid,
+                    NoDataStage,
+                    DataOutStage,
+                    DataInStage
+                };
+
+                decltype(Invalid) value;
+
+                constexpr operator decltype(Invalid) () const;
+
+                static constexpr TransferType FromType(uint8_t type);
+                constexpr uint8_t ToType() const;
+
+                constexpr bool operator==(const decltype(Invalid)& type) const;
+                constexpr bool operator!=(const decltype(Invalid)& type) const;
+            };
+
+            struct SetupTRB : public TransferTRB {
+            private:
+                constexpr void SetRequestType(uint8_t bmRequestType);
+                constexpr void SetRequest(uint8_t bRequest);
+                constexpr void SetValue(uint16_t wValue);
+                constexpr void SetIndex(uint16_t wIndex);
+                constexpr void SetLength(uint16_t wLength);
+                constexpr void SetTransferType(const TransferType& type);
+            
+            public:                
+                struct SetupDescriptor {
+                    uint8_t bmRequestType;
+                    uint8_t bRequest;
+                    uint16_t wValue;
+                    uint16_t wIndex;
+                    uint16_t wLength;
+                    uint32_t tranferLength;
+                    uint16_t interrupterTarget;
+                    bool cycle;
+                    bool interruptOnCompletion;
+                    TransferType transferType;
+                };
+
+                static SetupTRB Create(const SetupDescriptor& descriptor);
+            };
+
+            struct DataTRB : public TransferTRB {
+                struct DataDescriptor {
+                    void* bufferPointer;
+                    uint32_t transferLength;
+                    uint8_t tdSize;
+                    uint16_t interrupterTarget;
+                    bool cycle;
+                    bool evaluateNextTRB;
+                    bool interruptOnShortPacket;
+                    bool noSnoop;
+                    bool chain;
+                    bool interruptOnCompletion;
+                    bool immediateData;
+                    bool direction;
+                };
+
+                static DataTRB Create(const DataDescriptor& descriptor);
+            };
+
+            struct StatusTRB : public TransferTRB {
+                struct StatusDescriptor {
+                    uint16_t interrupterTarget;
+                    bool cycle;
+                    bool evaluateNextTRB;
+                    bool chain;
+                    bool interruptOnCompletion;
+                    bool direction;
+                };
+
+                static StatusTRB Create(const StatusDescriptor& descriptor);
             };
         }
     }
