@@ -7,6 +7,8 @@
 #include <devices/USB/xHCI/Device.hpp>
 #include <devices/USB/xHCI/Specification.hpp>
 
+#include <mm/Heap.hpp>
+#include <mm/Utils.hpp>
 #include <mm/VirtualMemory.hpp>
 
 #include <sched/Self.hpp>
@@ -14,6 +16,56 @@
 #include <screen/Log.hpp>
 
 namespace Devices::USB::xHCI {
+    void Device::EndpointDescriptor::Release() {
+        if (endpointType != EndpointType::Invalid) {
+            endpointType = EndpointType::Invalid;
+        }
+    }
+
+    void Device::InterfaceDescriptor::Release() {
+        if (valid) {
+            if (nextAlternate != nullptr) {
+                nextAlternate->Release();
+                Heap::Free(nextAlternate);
+                nextAlternate = nullptr;
+            }
+    
+            for (size_t i = 0; i < endpointsNumber; ++i) {
+                endpoints[i].Release();
+            }
+
+            Heap::Free(endpoints);
+            endpoints = nullptr;
+
+            if (extra != nullptr) {
+                DeviceSpecificDescriptor* current = extra;
+                DeviceSpecificDescriptor* last = current;
+
+                while (current != nullptr) {
+                    last = current;
+                    current = current->next;
+                    Heap::Free(last);
+                }
+
+                extra = nullptr;
+            }
+
+            valid = false;
+        }
+    }
+
+    void Device::ConfigurationDescriptor::Release() {
+        if (valid) {
+            for (size_t i = 0; i < interfacesNumber; ++i) {
+                interfaces[i].Release();
+            }
+            Heap::Free(interfaces);
+            interfaces = nullptr;
+
+            valid = false;
+        }
+    }
+
     Optional<uint16_t> Device::GetDefaultMaxPacketSize() const {
         switch (information.port_speed) {
             case PortSpeed::LowSpeed: return Optional<uint16_t>(8); break;
@@ -88,55 +140,71 @@ namespace Devices::USB::xHCI {
         return Success(result);
     }
 
+    size_t Device::GetDescriptorSize(const void* data) {
+        const RawDescriptorHeader* header = reinterpret_cast<const RawDescriptorHeader*>(data);
+        return static_cast<size_t>(header->length);
+    }
+
+    size_t Device::GetDescriptorType(const void* data) {
+        const RawDescriptorHeader* header = reinterpret_cast<const RawDescriptorHeader*>(data);
+        return static_cast<size_t>(header->descriptorType);
+    }
+
     Success Device::FetchDeviceDescriptor() {
-        Utils::LockGuard lock{transfer_lock};
+        uint8_t usb_descriptor[DeviceDescriptor::DESCRIPTOR_SIZE] = { 0 };
 
-        uint8_t usb_descriptor[18] = { 0 };
+        {
+            Utils::LockGuard _{transfer_lock};
 
-        SetupTRB setup = SetupTRB::Create({
-            .bmRequestType = 0x80,
-            .bRequest = 6,
-            .wValue = 0x0100,
-            .wIndex = 0,
-            .wLength = 18,
-            .tranferLength = 8,
-            .interrupterTarget = 0,
-            .cycle = control_transfer_ring->GetCycle(),
-            .interruptOnCompletion = false,
-            .transferType = TransferType::DataInStage
-        });
+            SetupTRB setup = SetupTRB::Create({
+                .bmRequestType = 0x80,
+                .bRequest = 6,
+                .wValue = 0x0100,
+                .wIndex = 0,
+                .wLength = DeviceDescriptor::DESCRIPTOR_SIZE,
+                .tranferLength = 8,
+                .interrupterTarget = 0,
+                .cycle = control_transfer_ring->GetCycle(),
+                .interruptOnCompletion = false,
+                .transferType = TransferType::DataInStage
+            });
 
-        control_transfer_ring->Enqueue(setup);
+            control_transfer_ring->Enqueue(setup);
 
-        DataTRB data = DataTRB::Create({
-            .bufferPointer = VirtualMemory::GetPhysicalAddress(usb_descriptor),
-            .transferLength = 18,
-            .tdSize = 18,
-            .interrupterTarget = 0,
-            .cycle = control_transfer_ring->GetCycle(),
-            .evaluateNextTRB = false,
-            .interruptOnShortPacket = false,
-            .noSnoop = false,
-            .chain = false,
-            .interruptOnCompletion = false,
-            .immediateData = false,
-            .direction = true
-        });
+            DataTRB data = DataTRB::Create({
+                .bufferPointer = VirtualMemory::GetPhysicalAddress(usb_descriptor),
+                .transferLength = DeviceDescriptor::DESCRIPTOR_SIZE,
+                .tdSize = 0,
+                .interrupterTarget = 0,
+                .cycle = control_transfer_ring->GetCycle(),
+                .evaluateNextTRB = false,
+                .interruptOnShortPacket = false,
+                .noSnoop = false,
+                .chain = false,
+                .interruptOnCompletion = false,
+                .immediateData = false,
+                .direction = true
+            });
 
-        control_transfer_ring->Enqueue(data);
+            control_transfer_ring->Enqueue(data);
 
-        StatusTRB status = StatusTRB::Create({
-            .interrupterTarget = 0,
-            .cycle = control_transfer_ring->GetCycle(),
-            .evaluateNextTRB = false,
-            .chain = false,
-            .interruptOnCompletion = true,
-            .direction = false
-        });
+            StatusTRB status = StatusTRB::Create({
+                .interrupterTarget = 0,
+                .cycle = control_transfer_ring->GetCycle(),
+                .evaluateNextTRB = false,
+                .chain = false,
+                .interruptOnCompletion = true,
+                .direction = false
+            });
 
-        const auto* ptr = control_transfer_ring->Enqueue(status);
+            const auto* ptr = control_transfer_ring->Enqueue(status);
 
-        if (!InitiateTransfer(ptr, 1).IsSuccess()) {
+            if (!InitiateTransfer(ptr, 1).IsSuccess()) {
+                return Failure();
+            }
+        }
+
+        if (!CheckDescriptor<DeviceDescriptor>(usb_descriptor).IsSuccess()) {
             return Failure();
         }
 
@@ -187,6 +255,567 @@ namespace Devices::USB::xHCI {
         };
 
         return Success();
+    }
+
+    Success Device::FetchConfigurations() {
+        const size_t configurations_size = sizeof(ConfigurationDescriptor) * descriptor.configurationsNumber;
+
+        configurations = reinterpret_cast<ConfigurationDescriptor*>(Heap::Allocate(configurations_size));
+
+        if (configurations == nullptr) {
+            return Failure();
+        }
+
+        for (size_t i = 0; i < descriptor.configurationsNumber; ++i) {
+            configurations[i] = ConfigurationDescriptor();
+        }
+
+
+        for (size_t i = 0; i < descriptor.configurationsNumber; ++i) {
+            uint8_t config_descriptor[ConfigurationDescriptor::DESCRIPTOR_SIZE] = { 0 };
+
+            {
+                Utils::LockGuard _{transfer_lock};
+
+                SetupTRB setup = SetupTRB::Create({
+                    .bmRequestType = 0x80,
+                    .bRequest = 6,
+                    .wValue = static_cast<uint16_t>((2 << 8) | (i)),
+                    .wIndex = 0,
+                    .wLength = ConfigurationDescriptor::DESCRIPTOR_SIZE,
+                    .tranferLength = 8,
+                    .interrupterTarget = 0,
+                    .cycle = control_transfer_ring->GetCycle(),
+                    .interruptOnCompletion = false,
+                    .transferType = TransferType::DataInStage
+                });
+
+                control_transfer_ring->Enqueue(setup);
+
+                DataTRB data = DataTRB::Create({
+                    .bufferPointer = VirtualMemory::GetPhysicalAddress(config_descriptor),
+                    .transferLength = ConfigurationDescriptor::DESCRIPTOR_SIZE,
+                    .tdSize = 0,
+                    .interrupterTarget = 0,
+                    .cycle = control_transfer_ring->GetCycle(),
+                    .evaluateNextTRB = false,
+                    .interruptOnShortPacket = false,
+                    .noSnoop = false,
+                    .chain = false,
+                    .interruptOnCompletion = false,
+                    .immediateData = false,
+                    .direction = true
+                });
+
+                control_transfer_ring->Enqueue(data);
+
+                StatusTRB status = StatusTRB::Create({
+                    .interrupterTarget = 0,
+                    .cycle = control_transfer_ring->GetCycle(),
+                    .evaluateNextTRB = false,
+                    .chain = false,
+                    .interruptOnCompletion = true,
+                    .direction = false
+                });
+
+                const auto* ptr = control_transfer_ring->Enqueue(status);
+
+                if (!InitiateTransfer(ptr, 1).IsSuccess()) {
+                    // skip this configuration
+                    continue;
+                }
+            }
+
+            auto config_result = ParseConfigurationDescriptor(config_descriptor, i);
+
+            if (!config_result.HasValue()) {
+                configurations[i].valid = false;
+                Log::printfSafe("[USB] Failed to fetch configuration descriptor %u for device %u\r\n", i, information.slot_id);
+            }
+            else {
+                configurations[i] = config_result.GetValue();
+                Log::printfSafe("[USB] Fetched configuration descriptor %u for device %u\r\n", i, information.slot_id);
+            }
+        }
+
+        return Success();
+    }
+
+    Optional<Device::ConfigurationDescriptor> Device::ParseConfigurationDescriptor(const uint8_t* data, uint8_t index) {
+        if (!CheckDescriptor<ConfigurationDescriptor>(data).IsSuccess()) {
+            return Optional<ConfigurationDescriptor>();
+        }
+        
+        const uint16_t* const totalLength = reinterpret_cast<const uint16_t*>(&data[2]);
+        const uint8_t* const interfacesNumber = &data[4];
+        const uint8_t* const configurationValue = &data[5];
+        const uint8_t* const configurationDescriptorIndex = &data[6];
+        const uint8_t* const attributes = &data[7];
+        const uint8_t* const maxPower = &data[8];
+
+        if (*interfacesNumber == 0) {
+            return Optional<ConfigurationDescriptor>();
+        }
+
+        ConfigurationDescriptor config_descriptor = {
+            .valid = true,
+            .interfacesNumber = *interfacesNumber,
+            .configurationValue = *configurationValue,
+            .configurationDescriptorIndex = *configurationDescriptorIndex,
+            .selfPowered = (*attributes & 0x40) != 0,
+            .supportsRemoteWakeup = (*attributes & 0x20) != 0,
+            .maxPower = *maxPower,
+            .interfaces = nullptr
+        };
+
+        uint8_t* buffer = reinterpret_cast<uint8_t*>(Heap::Allocate(*totalLength));
+
+        if (buffer == nullptr) {
+            return Optional<ConfigurationDescriptor>();
+        }
+
+        {
+            Utils::LockGuard _{transfer_lock};
+
+            SetupTRB setup = SetupTRB::Create({
+                .bmRequestType = 0x80,
+                .bRequest = 6,
+                .wValue = static_cast<uint16_t>((2 << 8) | (index)),
+                .wIndex = 0,
+                .wLength = *totalLength,
+                .tranferLength = 8,
+                .interrupterTarget = 0,
+                .cycle = control_transfer_ring->GetCycle(),
+                .interruptOnCompletion = false,
+                .transferType = TransferType::DataInStage
+            });
+
+            control_transfer_ring->Enqueue(setup);
+
+            DataTRB data = DataTRB::Create({
+                .bufferPointer = VirtualMemory::GetPhysicalAddress(buffer),
+                .transferLength = *totalLength,
+                .tdSize = 0,
+                .interrupterTarget = 0,
+                .cycle = control_transfer_ring->GetCycle(),
+                .evaluateNextTRB = false,
+                .interruptOnShortPacket = false,
+                .noSnoop = false,
+                .chain = false,
+                .interruptOnCompletion = false,
+                .immediateData = false,
+                .direction = true
+            });
+
+            control_transfer_ring->Enqueue(data);
+
+            StatusTRB status = StatusTRB::Create({
+                .interrupterTarget = 0,
+                .cycle = control_transfer_ring->GetCycle(),
+                .evaluateNextTRB = false,
+                .chain = false,
+                .interruptOnCompletion = true,
+                .direction = false
+            });
+
+            const auto* ptr = control_transfer_ring->Enqueue(status);
+
+            if (!InitiateTransfer(ptr, 1).IsSuccess()) {
+                Heap::Free(buffer);
+                return Optional<ConfigurationDescriptor>();
+            }
+        }
+
+        const size_t interface_size = sizeof(InterfaceDescriptor) * (config_descriptor.interfacesNumber);
+
+        config_descriptor.interfaces = reinterpret_cast<InterfaceDescriptor*>(Heap::Allocate(interface_size));
+
+        if (config_descriptor.interfaces == nullptr) {
+            Heap::Free(buffer);
+            return Optional<ConfigurationDescriptor>();
+        }
+
+        for (size_t i = 0; i < config_descriptor.interfacesNumber; ++i) {
+            config_descriptor.interfaces[i] = InterfaceDescriptor();
+        }
+
+        const uint8_t* ptr = buffer + GetDescriptorSize(data);
+        const uint8_t* const limit = buffer + *totalLength;
+
+        bool found_valid_interface = false;
+
+        while (ptr < limit) {
+            auto interface_wrapper = ParseInterfaceDescriptor(ptr, limit);
+
+            if (interface_wrapper.HasValue()) {
+                const auto& interface = interface_wrapper.GetValue();
+
+                if (config_descriptor.interfaces[interface.interfaceNumber].valid) {
+                    InterfaceDescriptor* current = &config_descriptor.interfaces[interface.interfaceNumber];
+
+                    while (current->nextAlternate != nullptr) {
+                        current = current->nextAlternate;
+                    }
+
+                    InterfaceDescriptor* alternate = reinterpret_cast<InterfaceDescriptor*>(Heap::Allocate(sizeof(InterfaceDescriptor)));
+
+                    if (alternate != nullptr) {
+                        *alternate = interface;
+                        current->nextAlternate = alternate;
+                        Log::printfSafe(
+                            "[USB] Parsed interface %u.%u\r\n",
+                            interface.interfaceNumber,
+                            interface.alternateSetting
+                        );
+                    }
+                    else {
+                        Log::printfSafe(
+                            "[USB] Failed to allocate memory for alternate interface %u.%u\r\n",
+                            interface.interfaceNumber,
+                            interface.alternateSetting
+                        );
+                    }
+                }
+                else {
+                    Log::printfSafe("[USB] Parsed interface %u.%u\r\n", interface.interfaceNumber, interface.alternateSetting);
+                    config_descriptor.interfaces[interface.interfaceNumber] = interface;
+                    found_valid_interface = true;
+                }
+            }
+            else {
+                Log::printfSafe("[USB] Failed to parse interface descriptor in configuration %u\r\n", index);
+            }
+        }
+
+        Heap::Free(buffer);
+
+        if (!found_valid_interface) {
+            config_descriptor.Release();
+            return Optional<ConfigurationDescriptor>();
+        }
+
+        return Optional<ConfigurationDescriptor>(config_descriptor);
+    }
+
+    Optional<Device::InterfaceDescriptor> Device::ParseInterfaceDescriptor(const uint8_t*& data, const uint8_t* limit) {        
+        if (!CheckDescriptor<InterfaceDescriptor>(data).IsSuccess() || data + InterfaceDescriptor::DESCRIPTOR_SIZE > limit) {
+            data += GetDescriptorSize(data);
+            return Optional<InterfaceDescriptor>();
+        }
+
+        const uint8_t* const interfaceNumber = &data[2];
+        const uint8_t* const alternateSetting = &data[3];
+        const uint8_t* const endpointsNumber = &data[4];
+        const uint8_t* const interfaceClass = &data[5];
+        const uint8_t* const interfaceSubClass = &data[6];
+        const uint8_t* const interfaceProtocol = &data[7];
+        const uint8_t* const interfaceDescriptorIndex = &data[8];
+
+        data += GetDescriptorSize(data);
+
+        InterfaceDescriptor interface_descriptor = {
+            .valid = true,
+            .interfaceNumber = *interfaceNumber,
+            .alternateSetting = *alternateSetting,
+            .endpointsNumber = *endpointsNumber,
+            .interfaceClass = *interfaceClass,
+            .interfaceSubClass = *interfaceSubClass,
+            .interfaceProtocol = *interfaceProtocol,
+            .interfaceDescriptorIndex = *interfaceDescriptorIndex,
+            .endpoints = nullptr,
+            .nextAlternate = nullptr
+        };
+
+        if (endpointsNumber != 0) {
+            const size_t endpoint_size = sizeof(EndpointDescriptor) * interface_descriptor.endpointsNumber;
+
+            interface_descriptor.endpoints = reinterpret_cast<EndpointDescriptor*>(Heap::Allocate(endpoint_size));
+
+            if (interface_descriptor.endpoints == nullptr) {
+                interface_descriptor.Release();
+                return Optional<InterfaceDescriptor>();
+            }
+
+            for (size_t i = 0; i < interface_descriptor.endpointsNumber; ++i) {
+                interface_descriptor.endpoints[i] = EndpointDescriptor();
+            }
+
+            for (size_t descriptor_index = 0; descriptor_index < interface_descriptor.endpointsNumber && data < limit; ++descriptor_index) {
+                while (GetDescriptorType(data) != EndpointDescriptor::DESCRIPTOR_TYPE && data < limit) {
+                    auto extra_wrapper = ParseDeviceSpecificDescriptor(data, limit);
+
+                    if (extra_wrapper.HasValue()) {
+                        DeviceSpecificDescriptor* extra = extra_wrapper.GetValue();
+
+                        if (interface_descriptor.extra == nullptr) {
+                            interface_descriptor.extra = extra;
+                        }
+                        else {
+                            DeviceSpecificDescriptor* current = interface_descriptor.extra;
+
+                            while (current->next != nullptr) {
+                                current = current->next;
+                            }
+
+                            current->next = extra;
+                        }
+
+                        Log::printfSafe(
+                            "[USB] Parsed extra descriptor (type 0x%0.2hhx) for interface %u.%u\r\n",
+                            extra->descriptorType,
+                            interface_descriptor.interfaceNumber,
+                            interface_descriptor.alternateSetting
+                        );
+                    }
+                }
+                
+                auto endpoint_wrapper = ParseEndpointDescriptor(data, limit);
+
+                if (endpoint_wrapper.HasValue()) {
+                    interface_descriptor.endpoints[descriptor_index] = endpoint_wrapper.GetValue();
+                    Log::printfSafe(
+                        "[USB] Parsed endpoint %u of interface %u.%u\r\n",
+                        interface_descriptor.endpoints[descriptor_index].endpointAddress,
+                        interface_descriptor.interfaceNumber,
+                        interface_descriptor.alternateSetting
+                    );
+                }
+                else {
+                    // If we can't parse an interface endpoint, fail on this interface
+                    Log::printfSafe(
+                        "[USB] Failed to parse endpoint %u of interface %u.%u\r\n",
+                        descriptor_index,
+                        interface_descriptor.interfaceNumber,
+                        interface_descriptor.alternateSetting
+                    );
+                    interface_descriptor.Release();
+                    return Optional<InterfaceDescriptor>();
+                }
+            }
+        }
+
+        return Optional<InterfaceDescriptor>(interface_descriptor);
+    }
+
+    Optional<Device::EndpointDescriptor> Device::ParseEndpointDescriptor(const uint8_t*& data, const uint8_t* limit) {
+        if (!CheckDescriptor<EndpointDescriptor>(data).IsSuccess() || data + EndpointDescriptor::DESCRIPTOR_SIZE > limit) {
+            Log::printfSafe("%u : %u\n\r", GetDescriptorSize(data), GetDescriptorType(data));
+            data += GetDescriptorSize(data);
+            return Optional<EndpointDescriptor>();
+        }
+
+        const uint8_t bEndpointAddress = data[2];
+        const uint8_t bmAttributes = data[3];
+        const uint16_t maxPacketSize = *reinterpret_cast<const uint16_t*>(&data[4]);
+        const uint8_t interval = data[6];
+
+        data += GetDescriptorSize(data);
+
+        static constexpr uint8_t ADDRESS_MASK       = 0x0F;
+        static constexpr uint8_t DIRECTION_IN_MASK  = 0x80;
+
+        static constexpr uint8_t TYPE_CONTROL       = 0;
+        static constexpr uint8_t TYPE_ISOCHRONOUS   = 1;
+        static constexpr uint8_t TYPE_BULK          = 2;
+        static constexpr uint8_t TYPE_INTERRUPT     = 3;
+
+        uint8_t endpoint_address = bEndpointAddress & ADDRESS_MASK;
+
+        if (endpoint_address == 0) {
+            return Optional<EndpointDescriptor>();
+        }
+
+        EndpointType endpoint_type = EndpointType::Invalid;
+
+        if ((bEndpointAddress & DIRECTION_IN_MASK) == 0) {
+            switch (bEndpointAddress & ADDRESS_MASK) {
+                case TYPE_CONTROL:     endpoint_type = EndpointType::ControlBidirectional; break;
+                case TYPE_ISOCHRONOUS: endpoint_type = EndpointType::IsochronousOut; break;
+                case TYPE_BULK:        endpoint_type = EndpointType::BulkOut; break;
+                case TYPE_INTERRUPT:   endpoint_type = EndpointType::InterruptOut; break;
+            }
+        }
+        else {
+            switch (bEndpointAddress & ADDRESS_MASK) {
+                case TYPE_CONTROL:     endpoint_type = EndpointType::ControlBidirectional; break;
+                case TYPE_ISOCHRONOUS: endpoint_type = EndpointType::IsochronousIn; break;
+                case TYPE_BULK:        endpoint_type = EndpointType::BulkIn; break;
+                case TYPE_INTERRUPT:   endpoint_type = EndpointType::InterruptIn; break;
+            }
+        }
+
+        static constexpr uint8_t INTERRUPT_TYPE_MASK    = 0x30;
+        static constexpr uint8_t INTERRUPT_TYPE_SHIFT   = 4;
+        static constexpr uint8_t INTERRUPT_PERIODIC     = 0;
+        static constexpr uint8_t INTERRUPT_NOTIFICATION = 1;
+
+        static constexpr uint8_t ISOCH_SYNC_TYPE_MASK   = 0x0C;
+        static constexpr uint8_t ISOCH_SYNC_TYPE_SHIFT  = 2;
+        static constexpr uint8_t ISOCH_NO_SYNC          = 0;
+        static constexpr uint8_t ISOCH_ASYNC            = 1;
+        static constexpr uint8_t ISOCH_ADAPTIVE         = 2;
+        static constexpr uint8_t ISOCH_SYNC             = 3;
+
+        static constexpr uint8_t ISOCH_USAGE_TYPE_MASK  = 0x30;
+        static constexpr uint8_t ISOCH_USAGE_TYPE_SHIFT = 4;
+        static constexpr uint8_t ISOCH_DATA             = 0;
+        static constexpr uint8_t ISOCH_FEEDBACK         = 1;
+        static constexpr uint8_t ISOCH_IMPLICIT         = 2;
+
+        EndpointDescriptor::ExtraConfig extra_config = {};
+
+        if (endpoint_type == EndpointType::InterruptIn || endpoint_type == EndpointType::InterruptOut) {
+            const uint8_t interrupt_type = (bmAttributes & INTERRUPT_TYPE_MASK) >> INTERRUPT_TYPE_SHIFT;
+
+            switch (interrupt_type) {
+                case INTERRUPT_PERIODIC:
+                    extra_config.interruptUsage = EndpointDescriptor::InterruptUsage::Periodic;
+                    break;
+                case INTERRUPT_NOTIFICATION:
+                    extra_config.interruptUsage = EndpointDescriptor::InterruptUsage::Notification;
+                    break;
+                default:
+                    return Optional<EndpointDescriptor>();
+            }
+        }
+        else if (endpoint_type == EndpointType::IsochronousIn || endpoint_type == EndpointType::IsochronousOut) {
+            const uint8_t sync_type = (bmAttributes & ISOCH_SYNC_TYPE_MASK) >> ISOCH_SYNC_TYPE_SHIFT;
+            const uint8_t usage_type = (bmAttributes & ISOCH_USAGE_TYPE_MASK) >> ISOCH_USAGE_TYPE_SHIFT;
+
+            switch (sync_type) {
+                case ISOCH_NO_SYNC:
+                    extra_config.isochSync = EndpointDescriptor::IsochronousSynchronization::None;
+                    break;
+                case ISOCH_ASYNC:
+                    extra_config.isochSync = EndpointDescriptor::IsochronousSynchronization::Asynchronous;
+                    break;
+                case ISOCH_ADAPTIVE:
+                    extra_config.isochSync = EndpointDescriptor::IsochronousSynchronization::Adaptive;
+                    break;
+                case ISOCH_SYNC:
+                    extra_config.isochSync = EndpointDescriptor::IsochronousSynchronization::Synchronous;
+                    break;
+                default:
+                    return Optional<EndpointDescriptor>();
+            }
+
+            switch (usage_type) {
+                case ISOCH_DATA:
+                    extra_config.isochUsage = EndpointDescriptor::IsochronousUsage::Data;
+                    break;
+                case ISOCH_FEEDBACK:
+                    extra_config.isochUsage = EndpointDescriptor::IsochronousUsage::Feedback;
+                    break;
+                case ISOCH_IMPLICIT:
+                    extra_config.isochUsage = EndpointDescriptor::IsochronousUsage::ImplicitFeedback;
+                    break;
+                default:
+                    return Optional<EndpointDescriptor>();
+            }
+        }
+
+        // fetch SuperSpeed configuration
+        static constexpr uint8_t SUPER_SPEED_ENDPOINT_COMPANION_DESCRIPTOR_TYPE = 0x30;
+        static constexpr uint8_t SUPER_SPEED_ENDPOINT_COMPANION_DESCRIPTOR_SIZE = 6;
+        static constexpr uint8_t SUPER_SPEED_PLUS_ISOCH_ENDPOINT_COMPANION_DESCRIPTOR_TYPE = 0x31;
+        static constexpr uint8_t SUPER_SPEED_PLUS_ISOCH_ENDPOINT_COMPANION_DESCRIPTOR_SIZE = 8;
+
+        EndpointDescriptor::SuperSpeedConfig superSpeedConfig = {};
+
+        if (GetDescriptorType(data) == SUPER_SPEED_ENDPOINT_COMPANION_DESCRIPTOR_TYPE) {
+            if (GetDescriptorSize(data) < SUPER_SPEED_ENDPOINT_COMPANION_DESCRIPTOR_SIZE) {
+                data += GetDescriptorSize(data);
+                return Optional<EndpointDescriptor>();
+            }
+            
+            const uint8_t maxBurst = data[2];
+            const uint8_t attributes = data[3];
+            const uint16_t bytesPerInterval = *reinterpret_cast<const uint16_t*>(&data[4]);
+
+            data += GetDescriptorSize(data);
+
+            superSpeedConfig.valid = true;
+            superSpeedConfig.maxBurst = maxBurst + 1;
+
+            static constexpr uint8_t MAX_STREAMS_MASK = 0x1F;
+            static constexpr uint8_t MULT_MASK = 0x03;
+            static constexpr uint8_t SSP_ISO_MASK = 0x80;
+
+            switch (endpoint_type) {
+                case EndpointType::BulkIn:
+                case EndpointType::BulkOut:
+                    superSpeedConfig.maxStreams = (attributes & MAX_STREAMS_MASK);
+                    if (superSpeedConfig.maxStreams > 0) {
+                        superSpeedConfig.maxStreams = 1U << superSpeedConfig.maxStreams;
+                    }
+                    break;
+                case EndpointType::IsochronousIn:
+                case EndpointType::IsochronousOut:
+                    superSpeedConfig.bytesPerInterval = bytesPerInterval;
+
+                    if ((attributes & SSP_ISO_MASK) != 0) {
+                        if (GetDescriptorType(data) != SUPER_SPEED_PLUS_ISOCH_ENDPOINT_COMPANION_DESCRIPTOR_TYPE) {
+                            return Optional<EndpointDescriptor>();
+                        }
+
+                        if (GetDescriptorSize(data) < SUPER_SPEED_PLUS_ISOCH_ENDPOINT_COMPANION_DESCRIPTOR_SIZE) {
+                            data += GetDescriptorSize(data);
+                            return Optional<EndpointDescriptor>();
+                        }
+
+                        superSpeedConfig.bytesPerInterval = *reinterpret_cast<const uint32_t*>(&data[4]);
+                        superSpeedConfig.maxPacketsPerInterval = (superSpeedConfig.bytesPerInterval + maxPacketSize - 1) / maxPacketSize;
+                    }
+                    else {
+                        superSpeedConfig.maxPacketsPerInterval = ((attributes & MULT_MASK) + 1) * (superSpeedConfig.maxBurst + 1);
+                    }
+
+        
+                    break;
+                default:
+                    break;
+            }
+        }
+        else {
+            superSpeedConfig.valid = false;
+        }
+        
+        EndpointDescriptor endpoint_descriptor = {
+            .endpointAddress = endpoint_address,
+            .endpointType = endpoint_type,
+            .extraConfig = extra_config,
+            .maxPacketSize = maxPacketSize,
+            .interval = interval,
+            .superSpeedConfig = superSpeedConfig
+        };
+        
+        return Optional<EndpointDescriptor>(endpoint_descriptor);
+    }
+
+    Optional<Device::DeviceSpecificDescriptor*> Device::ParseDeviceSpecificDescriptor(const uint8_t*& data, const uint8_t* limit) {
+        if (data + GetDescriptorSize(data) > limit) {
+            data += GetDescriptorSize(data);
+            return Optional<DeviceSpecificDescriptor*>();
+        }
+
+        const uint8_t length = data[0];
+        const uint8_t descriptorType = data[1];
+
+        DeviceSpecificDescriptor* descriptor = reinterpret_cast<DeviceSpecificDescriptor*>(Heap::Allocate(length));
+
+        if (descriptor == nullptr) {
+            data += length;
+            return Optional<DeviceSpecificDescriptor*>();
+        }
+
+        descriptor->descriptorType = descriptorType;
+        descriptor->length = length;
+        descriptor->next = nullptr;
+        Utils::memcmp(descriptor->data, data + 2, length - 2);
+
+        data += length;
+
+        return Optional<DeviceSpecificDescriptor*>(descriptor);
     }
 
     Device::Device(Controller& controller, const DeviceInformation& information)
@@ -270,6 +899,8 @@ namespace Devices::USB::xHCI {
 
         Log::printfSafe("[USB] Fetched device descriptor for device %u\n\r", information.slot_id);
 
+        FetchConfigurations();
+
         return Success();
     }
 
@@ -282,6 +913,14 @@ namespace Devices::USB::xHCI {
         if (control_transfer_ring != nullptr) {
             control_transfer_ring->Release();
             control_transfer_ring = nullptr;
+        }
+
+        if (configurations != nullptr) {
+            for (size_t i = 0; i < descriptor.configurationsNumber; ++i) {
+                configurations[i].Release();
+            }
+            Heap::Free(configurations);
+            configurations = nullptr;
         }
     }
 
