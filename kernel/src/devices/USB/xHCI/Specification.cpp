@@ -517,7 +517,7 @@ namespace Devices::USB::xHCI {
     TransferRing::TransferRing(TransferTRB* base, size_t capacity)
         : base{base}, index{0}, capacity{capacity}, cycle{true} { }
 
-    void TransferRing::EnqueueTRB(const TRB& trb) {
+    const TRB* TransferRing::EnqueueTRB(const TRB& trb) {
         static constexpr uint64_t WAIT_GRANULARITY_MS = 20;
 
         while (base[index].GetCycle() == trb.GetCycle()){
@@ -525,6 +525,7 @@ namespace Devices::USB::xHCI {
         }
 
         base[index] = reinterpret_cast<const TransferTRB&>(trb);
+        return &base[index];
     }
 
     void TransferRing::UpdatePointer() {
@@ -571,10 +572,11 @@ namespace Devices::USB::xHCI {
         return cycle;
     }
 
-    void TransferRing::Enqueue(const TransferTRB& trb) {
+    const TRB* TransferRing::Enqueue(const TransferTRB& trb) {
         Utils::LockGuard _{lock};
 
-        EnqueueTRB(trb);
+        const auto* ptr = EnqueueTRB(trb);
         UpdatePointer();
+        return ptr;
     }
 }

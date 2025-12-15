@@ -232,6 +232,7 @@ namespace Devices {
                 bool HasExtendedContext() const;
 
                 void LoadDeviceSlot(const Device& device);
+                Success RingDoorbell(const Device& device, uint32_t reason) const;
 
                 void Destroy();
             };

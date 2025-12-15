@@ -390,7 +390,7 @@ namespace Devices {
 
                 TransferRing(TransferTRB* base, size_t capacity);
 
-                void EnqueueTRB(const TRB& trb);
+                const TRB* EnqueueTRB(const TRB& trb);
                 void UpdatePointer();
 
             public:
@@ -399,7 +399,7 @@ namespace Devices {
                 const TransferTRB* GetBase() const;
                 void Release();
                 bool GetCycle() const;
-                void Enqueue(const TransferTRB& trb);
+                const TRB* Enqueue(const TransferTRB& trb);
             };
         }
     }

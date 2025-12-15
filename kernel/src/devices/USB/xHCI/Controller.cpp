@@ -135,9 +135,12 @@ namespace Devices::USB::xHCI {
 
         while (event->GetCycle() == event_cycle) {
             switch (event->GetType()) {
-                case EventTRB::Type::TransferEvent:
-                    Log::putsSafe("USB xHCI: Unhandled Transfer Event\n\r");
+                case EventTRB::Type::TransferEvent: {
+                    const auto& transfer_event = *reinterpret_cast<TransferEventTRB*>(event);
+                    const uint8_t slot_id = transfer_event.GetSlotID();
+                    devices[slot_id - 1].SignalTransferComplete(transfer_event);
                     break;
+                }
                 case EventTRB::Type::CommandCompletionEvent: {
                     command_completion.data[3] = event->data[3];
                     command_completion.data[1] = event->data[1];
@@ -668,7 +671,7 @@ namespace Devices::USB::xHCI {
 
                         Log::printfSafe("[xHCI] Port 0x%0.2hhx mapped to slot %hhu\n\r", i, ports[i].slot);
 
-                        new (&devices[slot_id - 1]) Device(*this, DeviceDescriptor{
+                        new (&devices[slot_id - 1]) Device(*this, DeviceInformation{
                             .route_string = 0,
                             .parent_port = static_cast<uint8_t>(i + 1),
                             .root_hub_port = static_cast<uint8_t>(i + 1),
@@ -994,7 +997,7 @@ namespace Devices::USB::xHCI {
     Optional<CommandCompletionEventTRB> Controller::SendCommand(const CommandTRB& trb) {
         static constexpr uint64_t COMPLETION_TIMEOUT_MS = 200;
         static constexpr auto COMMAND_STATUS_PREDICATE = [](void* arg) {
-            const Controller* controller = reinterpret_cast<Controller*>(arg);
+            const Controller* const controller = reinterpret_cast<Controller*>(arg);
             return __blatomic_load_4(&controller->command_completion.data[2], Utils::MemoryOrder::SEQ_CST) != 0;
         };
 
@@ -1037,7 +1040,19 @@ namespace Devices::USB::xHCI {
     }
 
     void Controller::LoadDeviceSlot(const Device& device) {
-        WriteDCBAAEntry(device.GetDescriptor().slot_id, device.GetOutputDeviceContext());
+        WriteDCBAAEntry(device.GetInformation().slot_id, device.GetOutputDeviceContext());
+    }
+
+    Success Controller::RingDoorbell(const Device& device, uint32_t reason) const {
+        static constexpr uint32_t DOORBELL_MASK = 0xFFFF00FF;
+
+        if (reason == 0 || (reason & DOORBELL_MASK) != reason) {
+            return Failure();
+        }
+
+        doorbell_regs->r[device.GetInformation().slot_id] = reason;
+
+        return Success();
     }
 
     void Controller::Destroy() {
