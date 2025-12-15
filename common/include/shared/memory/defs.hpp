@@ -89,7 +89,7 @@ namespace Shared {
         };
 
         template<typename T> concept AddressType = std::is_same_v<T, uint64_t> || std::is_pointer<T>::value;
-        template<AddressType T> constexpr VirtualAddress ParseVirtualAddress(T address) {
+        template<AddressType T> constexpr VirtualAddress ParseVirtualAddress(const T address) {
             if constexpr (std::is_same_v<T, uint64_t>) {
                 return VirtualAddress{
                     .PML4_offset    = static_cast<uint16_t>((address >> 39) & 0x1FF),

@@ -93,6 +93,20 @@ namespace VirtualMemory {
 		return GetPML4Address<usePrimary>() + pml4_offset;
 	};
 
+	template<bool usePrimary = true>
+	constexpr void* GetPhysicalAddress(const void* virtual_address) {
+		auto mapping = Shared::Memory::ParseVirtualAddress(reinterpret_cast<uint64_t>(virtual_address));
+
+		PTE* pte = GetPTEAddress<usePrimary>(
+			mapping.PML4_offset,
+			mapping.PDPT_offset,
+			mapping.PD_offset,
+			mapping.PT_offset
+		);
+
+		return reinterpret_cast<void*>((*pte & Shared::Memory::PTE_ADDRESS) | (reinterpret_cast<uint64_t>(virtual_address) & 0xFFF));
+	}
+
 	/// Paging constants
 
 	// Custom values (when the page is present and valid)
