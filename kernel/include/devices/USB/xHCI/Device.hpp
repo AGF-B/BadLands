@@ -113,18 +113,37 @@ namespace Devices {
                     static inline constexpr size_t DESCRIPTOR_SIZE = 9;
                     static inline constexpr size_t DESCRIPTOR_TYPE = 4;
 
-                    bool valid                          = false;
                     uint8_t interfaceNumber             = 0;
                     uint8_t alternateSetting            = 0;
                     uint8_t endpointsNumber             = 0;
-                    uint8_t interfaceClass              = 0;
-                    uint8_t interfaceSubClass           = 0;
-                    uint8_t interfaceProtocol           = 0;
                     uint8_t interfaceDescriptorIndex    = 0;
                     EndpointDescriptor* endpoints       = nullptr;
                     DeviceSpecificDescriptor* extra     = nullptr;
                     InterfaceDescriptor* nextAlternate  = nullptr;
+                    InterfaceDescriptor* next           = nullptr;
 
+                    Success AddAlternate(const InterfaceDescriptor& alternate);
+                    void Release();
+                };
+
+                struct InterfaceWrapper {
+                    uint8_t interfaceClass              = 0;
+                    uint8_t interfaceSubClass           = 0;
+                    uint8_t interfaceProtocol           = 0;
+                    InterfaceDescriptor descriptor;
+                };
+
+                struct FunctionDescriptor {
+                    uint8_t functionClass               = 0;
+                    uint8_t functionSubClass            = 0;
+                    uint8_t functionProtocol            = 0;
+                    uint8_t functionDescriptorIndex     = 0;
+                    uint8_t interfacesNumber            = 0;
+                    InterfaceDescriptor* interfaces     = nullptr;
+                    FunctionDescriptor* next            = nullptr;
+
+                    Success AddInterface(const InterfaceDescriptor& interface);
+                    InterfaceDescriptor* GetInterface(uint8_t id);
                     void Release();
                 };
 
@@ -139,8 +158,12 @@ namespace Devices {
                     bool selfPowered                        = false;
                     bool supportsRemoteWakeup               = false;
                     uint8_t maxPower                        = 0;
-                    InterfaceDescriptor* interfaces         = nullptr;
+                    uint8_t functionsNumber                 = 0;
+                    
+                    FunctionDescriptor* functions           = nullptr;
 
+                    Optional<FunctionDescriptor*> AddFunction(const FunctionDescriptor& function);
+                    FunctionDescriptor* GetFunction(uint8_t fClass, uint8_t fSubClass, uint8_t fProtocol) const;
                     void Release();
                 };
 
@@ -178,7 +201,7 @@ namespace Devices {
                 Success FetchDeviceDescriptor();
                 Success FetchConfigurations();
                 Optional<ConfigurationDescriptor> ParseConfigurationDescriptor(const uint8_t* data, uint8_t index);
-                Optional<InterfaceDescriptor> ParseInterfaceDescriptor(const uint8_t*& data, const uint8_t* limit);
+                Optional<InterfaceWrapper> ParseInterfaceDescriptor(const uint8_t*& data, const uint8_t* limit);
                 Optional<EndpointDescriptor> ParseEndpointDescriptor(const uint8_t*& data, const uint8_t* limit);
                 Optional<DeviceSpecificDescriptor*> ParseDeviceSpecificDescriptor(const uint8_t*& data, const uint8_t* limit);
 

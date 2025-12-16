@@ -22,45 +22,166 @@ namespace Devices::USB::xHCI {
         }
     }
 
-    void Device::InterfaceDescriptor::Release() {
-        if (valid) {
-            if (nextAlternate != nullptr) {
-                nextAlternate->Release();
-                Heap::Free(nextAlternate);
-                nextAlternate = nullptr;
-            }
-    
-            for (size_t i = 0; i < endpointsNumber; ++i) {
-                endpoints[i].Release();
-            }
+    Success Device::InterfaceDescriptor::AddAlternate(const InterfaceDescriptor& alternate) {
+        InterfaceDescriptor* const new_alternate = reinterpret_cast<InterfaceDescriptor*>(Heap::Allocate(sizeof(InterfaceDescriptor)));
 
-            Heap::Free(endpoints);
-            endpoints = nullptr;
-
-            if (extra != nullptr) {
-                DeviceSpecificDescriptor* current = extra;
-                DeviceSpecificDescriptor* last = current;
-
-                while (current != nullptr) {
-                    last = current;
-                    current = current->next;
-                    Heap::Free(last);
-                }
-
-                extra = nullptr;
-            }
-
-            valid = false;
+        if (new_alternate == nullptr) {
+            return Failure();
         }
+
+        *new_alternate = alternate;
+
+        InterfaceDescriptor* current = nextAlternate;
+
+        if (nextAlternate == nullptr) {
+            nextAlternate = new_alternate;
+        }
+        else {
+            while (current->nextAlternate != nullptr) {
+                current = current->nextAlternate;
+            }
+
+            current->nextAlternate = new_alternate;
+        }
+
+        return Success();
+    }
+
+    void Device::InterfaceDescriptor::Release() {
+        if (nextAlternate != nullptr) {
+            nextAlternate->Release();
+            Heap::Free(nextAlternate);
+            nextAlternate = nullptr;
+        }
+
+        for (size_t i = 0; i < endpointsNumber; ++i) {
+            endpoints[i].Release();
+        }
+
+        Heap::Free(endpoints);
+        endpoints = nullptr;
+
+        if (extra != nullptr) {
+            DeviceSpecificDescriptor* current = extra;
+            DeviceSpecificDescriptor* last = current;
+
+            while (current != nullptr) {
+                last = current;
+                current = current->next;
+                Heap::Free(last);
+            }
+
+            extra = nullptr;
+        }
+
+        if (next != nullptr) {
+            next->Release();
+            Heap::Free(next);
+            next = nullptr;
+        }
+    }
+
+    Success Device::FunctionDescriptor::AddInterface(const InterfaceDescriptor& interface) {
+        InterfaceDescriptor* const new_interface = reinterpret_cast<InterfaceDescriptor*>(Heap::Allocate(sizeof(InterfaceDescriptor)));
+
+        if (new_interface == nullptr) {
+            return Failure();
+        }
+
+        *new_interface = interface;
+
+        InterfaceDescriptor* current = interfaces;
+
+        if (current == nullptr) {
+            interfaces = new_interface;
+        }
+        else {
+            while (current->next != nullptr) {
+                current = current->next;
+            }
+
+            current->next = new_interface;
+        }
+
+        return Success();
+    }
+
+    Device::InterfaceDescriptor* Device::FunctionDescriptor::GetInterface(uint8_t id) {
+        InterfaceDescriptor* current = interfaces;
+
+        while (current != nullptr) {
+            if (current->interfaceNumber == id) {
+                return current;
+            }
+
+            current = current->next;
+        }
+
+        return current;
+    }
+
+    void Device::FunctionDescriptor::Release() {
+        if (interfaces != nullptr) {
+            interfaces->Release();
+            Heap::Free(interfaces);
+            interfaces = nullptr;
+        }
+
+        if (next != nullptr) {
+            next->Release();
+            Heap::Free(next);
+            next = nullptr;
+        }
+    }
+
+    Optional<Device::FunctionDescriptor*> Device::ConfigurationDescriptor::AddFunction(const Device::FunctionDescriptor& function) {        
+        FunctionDescriptor* const new_function = reinterpret_cast<FunctionDescriptor*>(Heap::Allocate(sizeof(FunctionDescriptor)));
+
+        if (new_function == nullptr) {
+            return Optional<FunctionDescriptor*>();
+        }
+
+        *new_function = function;
+
+        if (functions == nullptr) {
+            functions = new_function;
+        }
+        else {
+            FunctionDescriptor* current = functions;
+
+            while (current->next != nullptr) {
+                current = current->next;
+            }
+
+            current->next = new_function;
+        }
+
+        return Optional(new_function);
+    }
+
+    Device::FunctionDescriptor* Device::ConfigurationDescriptor::GetFunction(uint8_t fClass, uint8_t fSubClass, uint8_t fProtocol) const {
+        FunctionDescriptor* current = functions;
+
+        while (current != nullptr) {
+            if (current->functionClass == fClass &&
+                current->functionSubClass == fSubClass &&
+                current->functionProtocol == fProtocol) {
+                return current;
+            }
+
+            current = current->next;
+        }
+
+        return nullptr;
     }
 
     void Device::ConfigurationDescriptor::Release() {
         if (valid) {
             for (size_t i = 0; i < interfacesNumber; ++i) {
-                interfaces[i].Release();
+                functions[i].Release();
             }
-            Heap::Free(interfaces);
-            interfaces = nullptr;
+            Heap::Free(functions);
+            functions = nullptr;
 
             valid = false;
         }
@@ -321,7 +442,8 @@ namespace Devices::USB::xHCI {
                 const auto* ptr = control_transfer_ring->Enqueue(status);
 
                 if (!InitiateTransfer(ptr, 1).IsSuccess()) {
-                    // skip this configuration
+                    configurations[i].valid = false;
+                    Log::printfSafe("[USB] Failed to fetch configuration descriptor %u for device %u\r\n", i, information.slot_id);
                     continue;
                 }
             }
@@ -330,7 +452,7 @@ namespace Devices::USB::xHCI {
 
             if (!config_result.HasValue()) {
                 configurations[i].valid = false;
-                Log::printfSafe("[USB] Failed to fetch configuration descriptor %u for device %u\r\n", i, information.slot_id);
+                Log::printfSafe("[USB] Failed to parse configuration descriptor %u for device %u\r\n", i, information.slot_id);
             }
             else {
                 configurations[i] = config_result.GetValue();
@@ -365,7 +487,8 @@ namespace Devices::USB::xHCI {
             .selfPowered = (*attributes & 0x40) != 0,
             .supportsRemoteWakeup = (*attributes & 0x20) != 0,
             .maxPower = *maxPower,
-            .interfaces = nullptr
+            .functionsNumber = 0,
+            .functions = nullptr
         };
 
         uint8_t* buffer = reinterpret_cast<uint8_t*>(Heap::Allocate(*totalLength));
@@ -426,19 +549,6 @@ namespace Devices::USB::xHCI {
             }
         }
 
-        const size_t interface_size = sizeof(InterfaceDescriptor) * (config_descriptor.interfacesNumber);
-
-        config_descriptor.interfaces = reinterpret_cast<InterfaceDescriptor*>(Heap::Allocate(interface_size));
-
-        if (config_descriptor.interfaces == nullptr) {
-            Heap::Free(buffer);
-            return Optional<ConfigurationDescriptor>();
-        }
-
-        for (size_t i = 0; i < config_descriptor.interfacesNumber; ++i) {
-            config_descriptor.interfaces[i] = InterfaceDescriptor();
-        }
-
         const uint8_t* ptr = buffer + GetDescriptorSize(data);
         const uint8_t* const limit = buffer + *totalLength;
 
@@ -450,36 +560,65 @@ namespace Devices::USB::xHCI {
             if (interface_wrapper.HasValue()) {
                 const auto& interface = interface_wrapper.GetValue();
 
-                if (config_descriptor.interfaces[interface.interfaceNumber].valid) {
-                    InterfaceDescriptor* current = &config_descriptor.interfaces[interface.interfaceNumber];
+                FunctionDescriptor* function = config_descriptor.GetFunction(
+                    interface.interfaceClass,
+                    interface.interfaceSubClass,
+                    interface.interfaceProtocol
+                );
 
-                    while (current->nextAlternate != nullptr) {
-                        current = current->nextAlternate;
+                if (function == nullptr) {
+                    FunctionDescriptor new_function = {
+                        .functionClass = interface.interfaceClass,
+                        .functionSubClass = interface.interfaceSubClass,
+                        .functionProtocol = interface.interfaceProtocol,
+                        .functionDescriptorIndex = 0,
+                        .interfacesNumber = 0,
+                        .interfaces = nullptr,
+                        .next = nullptr
+                    };
+
+                    auto result = config_descriptor.AddFunction(new_function);
+
+                    if (!result.HasValue()) {
+                        Log::printfSafe("[USB] Failed to create function for interface %u\n\r", interface.descriptor.interfaceNumber);
+
+                        while (data < limit && GetDescriptorType(data) != InterfaceDescriptor::DESCRIPTOR_TYPE) {
+                            data += GetDescriptorSize(data);
+                        }
+
+                        continue;
                     }
 
-                    InterfaceDescriptor* alternate = reinterpret_cast<InterfaceDescriptor*>(Heap::Allocate(sizeof(InterfaceDescriptor)));
+                    function = result.GetValue();
+                }
 
-                    if (alternate != nullptr) {
-                        *alternate = interface;
-                        current->nextAlternate = alternate;
+                const auto& raw_interface = interface.descriptor;
+                auto* const function_interface = function->GetInterface(raw_interface.interfaceNumber);
+
+                if (function_interface != nullptr) {
+                    if (function_interface->AddAlternate(raw_interface).IsSuccess()) {
                         Log::printfSafe(
                             "[USB] Parsed interface %u.%u\r\n",
-                            interface.interfaceNumber,
-                            interface.alternateSetting
+                            raw_interface.interfaceNumber,
+                            raw_interface.alternateSetting
                         );
-                    }
+                    }                    
                     else {
                         Log::printfSafe(
-                            "[USB] Failed to allocate memory for alternate interface %u.%u\r\n",
-                            interface.interfaceNumber,
-                            interface.alternateSetting
+                            "[USB] Failed to add alternate interface %u.%u\r\n",
+                            raw_interface.interfaceNumber,
+                            raw_interface.alternateSetting
                         );
                     }
                 }
                 else {
-                    Log::printfSafe("[USB] Parsed interface %u.%u\r\n", interface.interfaceNumber, interface.alternateSetting);
-                    config_descriptor.interfaces[interface.interfaceNumber] = interface;
-                    found_valid_interface = true;
+                    if (function->AddInterface(raw_interface).IsSuccess()) {
+                        Log::printfSafe("[USB] Parsed interface %u.%u\r\n", raw_interface.interfaceNumber, raw_interface.alternateSetting);
+                        found_valid_interface = true;
+                    }
+                    else {
+                        Log::printfSafe("[USB] Failed to add interface %u.%u\r\n", raw_interface.interfaceNumber, raw_interface.alternateSetting);
+                    }
                 }
             }
             else {
@@ -497,10 +636,10 @@ namespace Devices::USB::xHCI {
         return Optional<ConfigurationDescriptor>(config_descriptor);
     }
 
-    Optional<Device::InterfaceDescriptor> Device::ParseInterfaceDescriptor(const uint8_t*& data, const uint8_t* limit) {        
+    Optional<Device::InterfaceWrapper> Device::ParseInterfaceDescriptor(const uint8_t*& data, const uint8_t* limit) {        
         if (!CheckDescriptor<InterfaceDescriptor>(data).IsSuccess() || data + InterfaceDescriptor::DESCRIPTOR_SIZE > limit) {
             data += GetDescriptorSize(data);
-            return Optional<InterfaceDescriptor>();
+            return Optional<InterfaceWrapper>();
         }
 
         const uint8_t* const interfaceNumber = &data[2];
@@ -514,16 +653,13 @@ namespace Devices::USB::xHCI {
         data += GetDescriptorSize(data);
 
         InterfaceDescriptor interface_descriptor = {
-            .valid = true,
             .interfaceNumber = *interfaceNumber,
             .alternateSetting = *alternateSetting,
             .endpointsNumber = *endpointsNumber,
-            .interfaceClass = *interfaceClass,
-            .interfaceSubClass = *interfaceSubClass,
-            .interfaceProtocol = *interfaceProtocol,
             .interfaceDescriptorIndex = *interfaceDescriptorIndex,
             .endpoints = nullptr,
-            .nextAlternate = nullptr
+            .nextAlternate = nullptr,
+            .next = nullptr
         };
 
         if (endpointsNumber != 0) {
@@ -533,7 +669,7 @@ namespace Devices::USB::xHCI {
 
             if (interface_descriptor.endpoints == nullptr) {
                 interface_descriptor.Release();
-                return Optional<InterfaceDescriptor>();
+                return Optional<InterfaceWrapper>();
             }
 
             for (size_t i = 0; i < interface_descriptor.endpointsNumber; ++i) {
@@ -589,12 +725,17 @@ namespace Devices::USB::xHCI {
                         interface_descriptor.alternateSetting
                     );
                     interface_descriptor.Release();
-                    return Optional<InterfaceDescriptor>();
+                    return Optional<InterfaceWrapper>();
                 }
             }
         }
 
-        return Optional<InterfaceDescriptor>(interface_descriptor);
+        return Optional<InterfaceWrapper>({
+            .interfaceClass = *interfaceClass,
+            .interfaceSubClass = *interfaceSubClass,
+            .interfaceProtocol = *interfaceProtocol,
+            .descriptor = interface_descriptor
+        });
     }
 
     Optional<Device::EndpointDescriptor> Device::ParseEndpointDescriptor(const uint8_t*& data, const uint8_t* limit) {
@@ -899,7 +1040,11 @@ namespace Devices::USB::xHCI {
 
         Log::printfSafe("[USB] Fetched device descriptor for device %u\n\r", information.slot_id);
 
-        FetchConfigurations();
+        if (!FetchConfigurations().IsSuccess()) {
+            Log::printfSafe("[USB] Failed to fetch configurations for device %u\n\r", information.slot_id);
+            Release();
+            return Failure();
+        }
 
         return Success();
     }
