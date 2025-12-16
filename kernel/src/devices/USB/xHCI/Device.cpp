@@ -103,6 +103,8 @@ namespace Devices::USB::xHCI {
             current->next = new_interface;
         }
 
+        ++interfacesNumber;
+
         return Success();
     }
 
@@ -555,6 +557,35 @@ namespace Devices::USB::xHCI {
         bool found_valid_interface = false;
 
         while (ptr < limit) {
+            // check for interface associations
+            static constexpr uint8_t INTERFACE_ASSOCIATION_TYPE = 11;
+            static constexpr uint8_t INTERFACE_ASSOCIATION_SIZE = 8;
+
+            if (GetDescriptorType(ptr) == INTERFACE_ASSOCIATION_TYPE) {
+                const auto descriptor_size = GetDescriptorSize(ptr);
+                if (descriptor_size >= INTERFACE_ASSOCIATION_SIZE && ptr + descriptor_size <= limit) {
+                    FunctionDescriptor new_function = {
+                        .functionClass = ptr[4],
+                        .functionSubClass = ptr[5],
+                        .functionProtocol = ptr[6],
+                        .functionDescriptorIndex = ptr[7],
+                        .interfacesNumber = 0,
+                        .interfaces = nullptr,
+                        .next = nullptr
+                    };
+
+                    if (config_descriptor.AddFunction(new_function).HasValue()) {
+                        Log::printfSafe("[USB] Created explicit interface association\r\n");
+                    }
+                    else {
+                        Log::printfSafe("[USB] Failed to create explicit interface association\r\n");
+                    }
+                }
+
+                ptr += descriptor_size;
+                continue;
+            }
+
             auto interface_wrapper = ParseInterfaceDescriptor(ptr, limit);
 
             if (interface_wrapper.HasValue()) {
@@ -582,8 +613,8 @@ namespace Devices::USB::xHCI {
                     if (!result.HasValue()) {
                         Log::printfSafe("[USB] Failed to create function for interface %u\n\r", interface.descriptor.interfaceNumber);
 
-                        while (data < limit && GetDescriptorType(data) != InterfaceDescriptor::DESCRIPTOR_TYPE) {
-                            data += GetDescriptorSize(data);
+                        while (ptr < limit && GetDescriptorType(ptr) != InterfaceDescriptor::DESCRIPTOR_TYPE) {
+                            ptr += GetDescriptorSize(ptr);
                         }
 
                         continue;
@@ -769,7 +800,7 @@ namespace Devices::USB::xHCI {
         EndpointType endpoint_type = EndpointType::Invalid;
 
         if ((bEndpointAddress & DIRECTION_IN_MASK) == 0) {
-            switch (bEndpointAddress & ADDRESS_MASK) {
+            switch (bmAttributes & ADDRESS_MASK) {
                 case TYPE_CONTROL:     endpoint_type = EndpointType::ControlBidirectional; break;
                 case TYPE_ISOCHRONOUS: endpoint_type = EndpointType::IsochronousOut; break;
                 case TYPE_BULK:        endpoint_type = EndpointType::BulkOut; break;
@@ -777,7 +808,7 @@ namespace Devices::USB::xHCI {
             }
         }
         else {
-            switch (bEndpointAddress & ADDRESS_MASK) {
+            switch (bmAttributes & ADDRESS_MASK) {
                 case TYPE_CONTROL:     endpoint_type = EndpointType::ControlBidirectional; break;
                 case TYPE_ISOCHRONOUS: endpoint_type = EndpointType::IsochronousIn; break;
                 case TYPE_BULK:        endpoint_type = EndpointType::BulkIn; break;
@@ -1044,6 +1075,79 @@ namespace Devices::USB::xHCI {
             Log::printfSafe("[USB] Failed to fetch configurations for device %u\n\r", information.slot_id);
             Release();
             return Failure();
+        }
+
+        Log::printfSafe("[USB] Fetched configurations for device %u\n\r", information.slot_id);
+
+        Log::printfSafe("[USB] Enumerating configuration topology...\n\r");
+
+        // enumerate configurations topology
+        for (size_t i = 0; i < descriptor.configurationsNumber; ++i) {
+            if (!configurations[i].valid) {
+                continue;
+            }
+
+            Log::printfSafe("[USB] Configuration %u:\r\n", i);
+
+            FunctionDescriptor* function = configurations[i].functions;
+            while (function != nullptr) {
+                Log::printfSafe(
+                    "[USB]   Function - Class: 0x%0.2hhx, SubClass: 0x%0.2hhx, Protocol: 0x%0.2hhx\r\n",
+                    function->functionClass,
+                    function->functionSubClass,
+                    function->functionProtocol
+                );
+
+                InterfaceDescriptor* interface = function->interfaces;
+                while (interface != nullptr) {
+                    Log::printfSafe(
+                        "[USB]     Interface %u.%u - %u endpoints\r\n",
+                        interface->interfaceNumber,
+                        interface->alternateSetting,
+                        interface->endpointsNumber
+                    );
+
+                    for (size_t j = 0; j < interface->endpointsNumber; ++j) {
+                        const auto& endpoint = interface->endpoints[j];
+
+                        Log::printfSafe(
+                            "[USB]       Endpoint 0x%0.2hhx - Type: %u, MaxPacketSize: %u\r\n",
+                            endpoint.endpointAddress,
+                            endpoint.endpointType.ToEndpointType(),
+                            endpoint.maxPacketSize
+                        );
+
+                        if (endpoint.endpointType == EndpointType::InterruptIn
+                            || endpoint.endpointType == EndpointType::InterruptOut
+                        ) {
+                            Log::printfSafe(
+                                "[USB]         Interrupt Usage: %u\r\n",
+                                endpoint.extraConfig.interruptUsage
+                            );
+                        }
+                        else if (endpoint.endpointType == EndpointType::IsochronousIn || endpoint.endpointType == EndpointType::IsochronousOut) {
+                            Log::printfSafe(
+                                "[USB]         Isoch Sync: %u, Usage: %u\r\n",
+                                endpoint.extraConfig.isochSync,
+                                endpoint.extraConfig.isochUsage
+                            );
+                        }
+
+                        if (endpoint.superSpeedConfig.valid) {
+                            Log::printfSafe(
+                                "[USB]         SuperSpeed - MaxBurst: %u, MaxStreams: %u, BytesPerInterval: %u\r\n",
+                                endpoint.superSpeedConfig.maxBurst,
+                                endpoint.superSpeedConfig.maxStreams,
+                                endpoint.superSpeedConfig.bytesPerInterval
+                            );
+                        }
+                    }
+
+                    interface = interface->next;
+                }
+
+                function = function->next;
+            }
         }
 
         return Success();
