@@ -167,21 +167,12 @@ namespace Devices {
                     void Release();
                 };
 
+                struct StringDescriptor {
+                    static inline constexpr size_t DESCRIPTOR_TYPE = 3;
+                    static inline constexpr size_t MIN_DESCRIPTOR_SIZE = 2;
+                };
+
             private:
-                Controller& controller;
-                const DeviceInformation information;
-
-                ContextWrapper* context_wrapper = nullptr;
-                TransferRing* control_transfer_ring = nullptr;
-
-                Utils::Lock transfer_lock;
-                Utils::SimpleAtomic<bool> transfer_complete{false};
-                const TRB* awaiting_transfer = nullptr;
-                TransferEventTRB transfer_result;
-
-                DeviceDescriptor descriptor;
-                ConfigurationDescriptor* configurations = nullptr;
-
                 Optional<uint16_t> GetDefaultMaxPacketSize() const;
                 Success AddressDevice();
                 Success InitiateTransfer(const TRB* trb, uint32_t reason);
@@ -200,10 +191,29 @@ namespace Devices {
 
                 Success FetchDeviceDescriptor();
                 Success FetchConfigurations();
-                Optional<ConfigurationDescriptor> ParseConfigurationDescriptor(const uint8_t* data, uint8_t index);
+                Optional<ConfigurationDescriptor> ParseConfigurationDescriptor(uint8_t index);
                 Optional<InterfaceWrapper> ParseInterfaceDescriptor(const uint8_t*& data, const uint8_t* limit);
                 Optional<EndpointDescriptor> ParseEndpointDescriptor(const uint8_t*& data, const uint8_t* limit);
                 Optional<DeviceSpecificDescriptor*> ParseDeviceSpecificDescriptor(const uint8_t*& data, const uint8_t* limit);
+
+            protected:
+                Controller& controller;
+                const DeviceInformation information;
+
+                ContextWrapper* context_wrapper = nullptr;
+                TransferRing* control_transfer_ring = nullptr;
+
+                Utils::Lock transfer_lock;
+                Utils::SimpleAtomic<bool> transfer_complete{false};
+                const TRB* awaiting_transfer = nullptr;
+                TransferEventTRB transfer_result;
+
+                DeviceDescriptor descriptor;
+                ConfigurationDescriptor* configurations = nullptr;
+
+                Optional<uint8_t*> GetDescriptor(uint8_t type, uint8_t index, uint8_t languageID = 0);
+                Success GetDescriptor(uint8_t type, uint8_t index, uint16_t length, uint8_t* buffer, uint8_t languageID = 0);
+                Optional<char*> GetString(uint8_t index, uint16_t languageID = 0);
 
             public:
                 Device(Controller& controller, const DeviceInformation& information);
@@ -211,7 +221,7 @@ namespace Devices {
                 const DeviceInformation& GetInformation() const;
                 const void* GetOutputDeviceContext() const;
 
-                Success Initialize();
+                Optional<Device*> Initialize();
                 void Release();
 
                 void SignalTransferComplete(const TransferEventTRB& trb);

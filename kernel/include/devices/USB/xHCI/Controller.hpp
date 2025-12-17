@@ -129,7 +129,7 @@ namespace Devices {
                 uint8_t max_slots_enabled = 0;
 
                 DCBAA* dcbaa = nullptr;
-                Device* devices = nullptr;
+                Device** devices = nullptr;
 
                 Utils::Lock command_lock;
                 TRB* command_ring = nullptr;

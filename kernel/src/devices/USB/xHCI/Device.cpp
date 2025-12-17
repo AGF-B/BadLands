@@ -3,6 +3,7 @@
 #include <shared/LockGuard.hpp>
 #include <shared/Response.hpp>
 
+#include <devices/USB/HID/Device.hpp>
 #include <devices/USB/xHCI/Controller.hpp>
 #include <devices/USB/xHCI/Device.hpp>
 #include <devices/USB/xHCI/Specification.hpp>
@@ -273,58 +274,127 @@ namespace Devices::USB::xHCI {
         return static_cast<size_t>(header->descriptorType);
     }
 
+    Optional<uint8_t*> Device::GetDescriptor(uint8_t type, uint8_t index, uint8_t languageID) {
+        RawDescriptorHeader header;
+        
+        if (!GetDescriptor(type, index, sizeof(RawDescriptorHeader), reinterpret_cast<uint8_t*>(&header), languageID).IsSuccess()) {
+            return Optional<uint8_t*>();
+        }
+
+        const size_t descriptor_size = static_cast<size_t>(header.length);
+
+        uint8_t* descriptor_data = reinterpret_cast<uint8_t*>(Heap::Allocate(descriptor_size));
+
+        if (descriptor_data == nullptr) {
+            return Optional<uint8_t*>();
+        }
+
+        if (!GetDescriptor(type, index, static_cast<uint16_t>(descriptor_size), descriptor_data, languageID).IsSuccess()) {
+            Heap::Free(descriptor_data);
+            return Optional<uint8_t*>();
+        }
+
+        return Optional<uint8_t*>(descriptor_data);
+    }
+
+    Success Device::GetDescriptor(uint8_t type, uint8_t index, uint16_t length, uint8_t* buffer, uint8_t languageID) {
+        Utils::LockGuard _{transfer_lock};
+
+        SetupTRB setup = SetupTRB::Create({
+            .bmRequestType = 0x80,
+            .bRequest = 6,
+            .wValue = static_cast<uint16_t>((static_cast<uint16_t>(type) << 8) | index),
+            .wIndex = static_cast<uint16_t>(languageID),
+            .wLength = static_cast<uint16_t>(length),
+            .tranferLength = 8,
+            .interrupterTarget = 0,
+            .cycle = control_transfer_ring->GetCycle(),
+            .interruptOnCompletion = false,
+            .transferType = TransferType::DataInStage
+        });
+
+        control_transfer_ring->Enqueue(setup);
+
+        DataTRB data = DataTRB::Create({
+            .bufferPointer = VirtualMemory::GetPhysicalAddress(buffer),
+            .transferLength = length,
+            .tdSize = 0,
+            .interrupterTarget = 0,
+            .cycle = control_transfer_ring->GetCycle(),
+            .evaluateNextTRB = false,
+            .interruptOnShortPacket = false,
+            .noSnoop = false,
+            .chain = false,
+            .interruptOnCompletion = false,
+            .immediateData = false,
+            .direction = true
+        });
+
+        control_transfer_ring->Enqueue(data);
+
+        StatusTRB status = StatusTRB::Create({
+            .interrupterTarget = 0,
+            .cycle = control_transfer_ring->GetCycle(),
+            .evaluateNextTRB = false,
+            .chain = false,
+            .interruptOnCompletion = true,
+            .direction = false
+        });
+
+        const auto* ptr = control_transfer_ring->Enqueue(status);
+
+        if (!InitiateTransfer(ptr, 1).IsSuccess() || transfer_result.GetCompletionCode() != TRB::CompletionCode::Success) {
+            return Failure();
+        }
+
+        return Success();
+    }
+
+    Optional<char*> Device::GetString(uint8_t index, uint16_t languageID) {
+        if (languageID == 0) {
+            return Optional<char*>();
+        }
+
+        auto descriptor_wrapper = GetDescriptor(StringDescriptor::DESCRIPTOR_TYPE, index, languageID);
+
+        if (!descriptor_wrapper.HasValue()) {
+            return Optional<char*>();
+        }
+
+        uint8_t* const descriptor_data = descriptor_wrapper.GetValue();
+
+        if (GetDescriptorSize(descriptor_data) < StringDescriptor::MIN_DESCRIPTOR_SIZE ||
+            GetDescriptorType(descriptor_data) != StringDescriptor::DESCRIPTOR_TYPE) {
+            Heap::Free(descriptor_data);
+            return Optional<char*>();
+        }
+
+        const size_t descriptor_size = GetDescriptorSize(descriptor_data);
+
+        const size_t string_length = (descriptor_size - 2) / sizeof(uint16_t);
+        char* const result_string = reinterpret_cast<char*>(Heap::Allocate(string_length + 1));
+
+        if (result_string == nullptr) {
+            Heap::Free(descriptor_data);
+            return Optional<char*>();
+        }
+
+        for (size_t i = 0; i < string_length; ++i) {
+            const uint16_t* const char_ptr = reinterpret_cast<uint16_t*>(&descriptor_data[2 * (i + 1)]);
+            result_string[i] = static_cast<char>(*char_ptr);
+        }
+
+        result_string[string_length] = '\0';
+
+        Heap::Free(descriptor_data);
+        return Optional<char*>(result_string);
+    }
+
     Success Device::FetchDeviceDescriptor() {
         uint8_t usb_descriptor[DeviceDescriptor::DESCRIPTOR_SIZE] = { 0 };
 
-        {
-            Utils::LockGuard _{transfer_lock};
-
-            SetupTRB setup = SetupTRB::Create({
-                .bmRequestType = 0x80,
-                .bRequest = 6,
-                .wValue = 0x0100,
-                .wIndex = 0,
-                .wLength = DeviceDescriptor::DESCRIPTOR_SIZE,
-                .tranferLength = 8,
-                .interrupterTarget = 0,
-                .cycle = control_transfer_ring->GetCycle(),
-                .interruptOnCompletion = false,
-                .transferType = TransferType::DataInStage
-            });
-
-            control_transfer_ring->Enqueue(setup);
-
-            DataTRB data = DataTRB::Create({
-                .bufferPointer = VirtualMemory::GetPhysicalAddress(usb_descriptor),
-                .transferLength = DeviceDescriptor::DESCRIPTOR_SIZE,
-                .tdSize = 0,
-                .interrupterTarget = 0,
-                .cycle = control_transfer_ring->GetCycle(),
-                .evaluateNextTRB = false,
-                .interruptOnShortPacket = false,
-                .noSnoop = false,
-                .chain = false,
-                .interruptOnCompletion = false,
-                .immediateData = false,
-                .direction = true
-            });
-
-            control_transfer_ring->Enqueue(data);
-
-            StatusTRB status = StatusTRB::Create({
-                .interrupterTarget = 0,
-                .cycle = control_transfer_ring->GetCycle(),
-                .evaluateNextTRB = false,
-                .chain = false,
-                .interruptOnCompletion = true,
-                .direction = false
-            });
-
-            const auto* ptr = control_transfer_ring->Enqueue(status);
-
-            if (!InitiateTransfer(ptr, 1).IsSuccess()) {
-                return Failure();
-            }
+        if (!GetDescriptor(DeviceDescriptor::DESCRIPTOR_TYPE, 0, DeviceDescriptor::DESCRIPTOR_SIZE, usb_descriptor).IsSuccess()) {
+            return Failure();
         }
 
         if (!CheckDescriptor<DeviceDescriptor>(usb_descriptor).IsSuccess()) {
@@ -395,62 +465,7 @@ namespace Devices::USB::xHCI {
 
 
         for (size_t i = 0; i < descriptor.configurationsNumber; ++i) {
-            uint8_t config_descriptor[ConfigurationDescriptor::DESCRIPTOR_SIZE] = { 0 };
-
-            {
-                Utils::LockGuard _{transfer_lock};
-
-                SetupTRB setup = SetupTRB::Create({
-                    .bmRequestType = 0x80,
-                    .bRequest = 6,
-                    .wValue = static_cast<uint16_t>((2 << 8) | (i)),
-                    .wIndex = 0,
-                    .wLength = ConfigurationDescriptor::DESCRIPTOR_SIZE,
-                    .tranferLength = 8,
-                    .interrupterTarget = 0,
-                    .cycle = control_transfer_ring->GetCycle(),
-                    .interruptOnCompletion = false,
-                    .transferType = TransferType::DataInStage
-                });
-
-                control_transfer_ring->Enqueue(setup);
-
-                DataTRB data = DataTRB::Create({
-                    .bufferPointer = VirtualMemory::GetPhysicalAddress(config_descriptor),
-                    .transferLength = ConfigurationDescriptor::DESCRIPTOR_SIZE,
-                    .tdSize = 0,
-                    .interrupterTarget = 0,
-                    .cycle = control_transfer_ring->GetCycle(),
-                    .evaluateNextTRB = false,
-                    .interruptOnShortPacket = false,
-                    .noSnoop = false,
-                    .chain = false,
-                    .interruptOnCompletion = false,
-                    .immediateData = false,
-                    .direction = true
-                });
-
-                control_transfer_ring->Enqueue(data);
-
-                StatusTRB status = StatusTRB::Create({
-                    .interrupterTarget = 0,
-                    .cycle = control_transfer_ring->GetCycle(),
-                    .evaluateNextTRB = false,
-                    .chain = false,
-                    .interruptOnCompletion = true,
-                    .direction = false
-                });
-
-                const auto* ptr = control_transfer_ring->Enqueue(status);
-
-                if (!InitiateTransfer(ptr, 1).IsSuccess()) {
-                    configurations[i].valid = false;
-                    Log::printfSafe("[USB] Failed to fetch configuration descriptor %u for device %u\r\n", i, information.slot_id);
-                    continue;
-                }
-            }
-
-            auto config_result = ParseConfigurationDescriptor(config_descriptor, i);
+            auto config_result = ParseConfigurationDescriptor(i);
 
             if (!config_result.HasValue()) {
                 configurations[i].valid = false;
@@ -465,8 +480,25 @@ namespace Devices::USB::xHCI {
         return Success();
     }
 
-    Optional<Device::ConfigurationDescriptor> Device::ParseConfigurationDescriptor(const uint8_t* data, uint8_t index) {
-        if (!CheckDescriptor<ConfigurationDescriptor>(data).IsSuccess()) {
+    Optional<Device::ConfigurationDescriptor> Device::ParseConfigurationDescriptor(uint8_t index) {
+        uint16_t pre_data[2] = { 0 };
+
+        auto pre_data_wrapper = GetDescriptor(ConfigurationDescriptor::DESCRIPTOR_TYPE, index, sizeof(pre_data), reinterpret_cast<uint8_t*>(pre_data));
+
+        if (!pre_data_wrapper.IsSuccess()) {
+            return Optional<ConfigurationDescriptor>();
+        }
+
+        const size_t descriptor_size = static_cast<size_t>(pre_data[1]);
+
+        uint8_t* const data = reinterpret_cast<uint8_t*>(Heap::Allocate(descriptor_size));
+
+        if (data == nullptr) {
+            return Optional<ConfigurationDescriptor>();
+        }
+
+        if (!GetDescriptor(ConfigurationDescriptor::DESCRIPTOR_TYPE, index, descriptor_size, data).IsSuccess()) {
+            Heap::Free(data);
             return Optional<ConfigurationDescriptor>();
         }
         
@@ -493,66 +525,8 @@ namespace Devices::USB::xHCI {
             .functions = nullptr
         };
 
-        uint8_t* buffer = reinterpret_cast<uint8_t*>(Heap::Allocate(*totalLength));
-
-        if (buffer == nullptr) {
-            return Optional<ConfigurationDescriptor>();
-        }
-
-        {
-            Utils::LockGuard _{transfer_lock};
-
-            SetupTRB setup = SetupTRB::Create({
-                .bmRequestType = 0x80,
-                .bRequest = 6,
-                .wValue = static_cast<uint16_t>((2 << 8) | (index)),
-                .wIndex = 0,
-                .wLength = *totalLength,
-                .tranferLength = 8,
-                .interrupterTarget = 0,
-                .cycle = control_transfer_ring->GetCycle(),
-                .interruptOnCompletion = false,
-                .transferType = TransferType::DataInStage
-            });
-
-            control_transfer_ring->Enqueue(setup);
-
-            DataTRB data = DataTRB::Create({
-                .bufferPointer = VirtualMemory::GetPhysicalAddress(buffer),
-                .transferLength = *totalLength,
-                .tdSize = 0,
-                .interrupterTarget = 0,
-                .cycle = control_transfer_ring->GetCycle(),
-                .evaluateNextTRB = false,
-                .interruptOnShortPacket = false,
-                .noSnoop = false,
-                .chain = false,
-                .interruptOnCompletion = false,
-                .immediateData = false,
-                .direction = true
-            });
-
-            control_transfer_ring->Enqueue(data);
-
-            StatusTRB status = StatusTRB::Create({
-                .interrupterTarget = 0,
-                .cycle = control_transfer_ring->GetCycle(),
-                .evaluateNextTRB = false,
-                .chain = false,
-                .interruptOnCompletion = true,
-                .direction = false
-            });
-
-            const auto* ptr = control_transfer_ring->Enqueue(status);
-
-            if (!InitiateTransfer(ptr, 1).IsSuccess()) {
-                Heap::Free(buffer);
-                return Optional<ConfigurationDescriptor>();
-            }
-        }
-
-        const uint8_t* ptr = buffer + GetDescriptorSize(data);
-        const uint8_t* const limit = buffer + *totalLength;
+        const uint8_t* ptr = data + GetDescriptorSize(data);
+        const uint8_t* const limit = data + *totalLength;
 
         bool found_valid_interface = false;
 
@@ -657,7 +631,7 @@ namespace Devices::USB::xHCI {
             }
         }
 
-        Heap::Free(buffer);
+        Heap::Free(data);
 
         if (!found_valid_interface) {
             config_descriptor.Release();
@@ -670,6 +644,7 @@ namespace Devices::USB::xHCI {
     Optional<Device::InterfaceWrapper> Device::ParseInterfaceDescriptor(const uint8_t*& data, const uint8_t* limit) {        
         if (!CheckDescriptor<InterfaceDescriptor>(data).IsSuccess() || data + InterfaceDescriptor::DESCRIPTOR_SIZE > limit) {
             data += GetDescriptorSize(data);
+            __asm__ volatile("jmp .");
             return Optional<InterfaceWrapper>();
         }
 
@@ -1001,7 +976,7 @@ namespace Devices::USB::xHCI {
         return context_wrapper->GetOutputDeviceContextAddress();
     }
 
-    Success Device::Initialize() {
+    Optional<Device*> Device::Initialize() {
         Log::printfSafe("[USB] Initializing device %u\r\n", information.slot_id);
         
         // Initialize contexts
@@ -1009,7 +984,7 @@ namespace Devices::USB::xHCI {
 
         if (!context_wrapper_result.HasValue()) {
             Log::printfSafe("[USB] Failed to create context wrapper for device %u\r\n", information.slot_id);
-            return Failure();
+            return Optional<Device*>();
         }
 
         context_wrapper = context_wrapper_result.GetValue();
@@ -1029,7 +1004,7 @@ namespace Devices::USB::xHCI {
         if (!transfer_ring_result.HasValue()) {
             Log::printfSafe("[USB] Failed to create control transfer ring for device %u\r\n", information.slot_id);
             Release();
-            return Failure();
+            return Optional<Device*>();
         }
 
         control_transfer_ring = transfer_ring_result.GetValue();
@@ -1041,7 +1016,7 @@ namespace Devices::USB::xHCI {
         if (!max_packet_size.HasValue()) {
             Log::printfSafe("[USB] Failed to determine default max packet size for device %u\r\n", information.slot_id);
             Release();
-            return Failure();
+            return Optional<Device*>();
         }
 
         control_endpoint_context->SetEndpointType(EndpointType::ControlBidirectional);
@@ -1057,7 +1032,7 @@ namespace Devices::USB::xHCI {
         if (!AddressDevice().IsSuccess()) {
             Log::printfSafe("[USB] Addressing failed for device %u\r\n", information.slot_id);
             Release();
-            return Failure();
+            return Optional<Device*>();
         }
 
         Log::printfSafe("[USB] Device %u successfully addressed\r\n", information.slot_id);
@@ -1066,7 +1041,7 @@ namespace Devices::USB::xHCI {
         if (!FetchDeviceDescriptor().IsSuccess()) {
             Log::printfSafe("[USB] Failed to fetch device descriptor for device %u\n\r", information.slot_id);
             Release();
-            return Failure();
+            return Optional<Device*>();
         }
 
         Log::printfSafe("[USB] Fetched device descriptor for device %u\n\r", information.slot_id);
@@ -1074,83 +1049,71 @@ namespace Devices::USB::xHCI {
         if (!FetchConfigurations().IsSuccess()) {
             Log::printfSafe("[USB] Failed to fetch configurations for device %u\n\r", information.slot_id);
             Release();
-            return Failure();
+            return Optional<Device*>();
         }
 
         Log::printfSafe("[USB] Fetched configurations for device %u\n\r", information.slot_id);
 
         Log::printfSafe("[USB] Enumerating configuration topology...\n\r");
 
-        // enumerate configurations topology
-        for (size_t i = 0; i < descriptor.configurationsNumber; ++i) {
-            if (!configurations[i].valid) {
-                continue;
+        if (descriptor.manufacturerDescriptorIndex != 0) {
+            auto manufacturer_string_wrapper = GetString(descriptor.manufacturerDescriptorIndex, 0x0409);
+
+            if (manufacturer_string_wrapper.HasValue()) {
+                Log::printfSafe("[USB] Manufacturer String: %s\r\n", manufacturer_string_wrapper.GetValue());
+                Heap::Free(manufacturer_string_wrapper.GetValue());
             }
-
-            Log::printfSafe("[USB] Configuration %u:\r\n", i);
-
-            FunctionDescriptor* function = configurations[i].functions;
-            while (function != nullptr) {
-                Log::printfSafe(
-                    "[USB]   Function - Class: 0x%0.2hhx, SubClass: 0x%0.2hhx, Protocol: 0x%0.2hhx\r\n",
-                    function->functionClass,
-                    function->functionSubClass,
-                    function->functionProtocol
-                );
-
-                InterfaceDescriptor* interface = function->interfaces;
-                while (interface != nullptr) {
-                    Log::printfSafe(
-                        "[USB]     Interface %u.%u - %u endpoints\r\n",
-                        interface->interfaceNumber,
-                        interface->alternateSetting,
-                        interface->endpointsNumber
-                    );
-
-                    for (size_t j = 0; j < interface->endpointsNumber; ++j) {
-                        const auto& endpoint = interface->endpoints[j];
-
-                        Log::printfSafe(
-                            "[USB]       Endpoint 0x%0.2hhx - Type: %u, MaxPacketSize: %u\r\n",
-                            endpoint.endpointAddress,
-                            endpoint.endpointType.ToEndpointType(),
-                            endpoint.maxPacketSize
-                        );
-
-                        if (endpoint.endpointType == EndpointType::InterruptIn
-                            || endpoint.endpointType == EndpointType::InterruptOut
-                        ) {
-                            Log::printfSafe(
-                                "[USB]         Interrupt Usage: %u\r\n",
-                                endpoint.extraConfig.interruptUsage
-                            );
-                        }
-                        else if (endpoint.endpointType == EndpointType::IsochronousIn || endpoint.endpointType == EndpointType::IsochronousOut) {
-                            Log::printfSafe(
-                                "[USB]         Isoch Sync: %u, Usage: %u\r\n",
-                                endpoint.extraConfig.isochSync,
-                                endpoint.extraConfig.isochUsage
-                            );
-                        }
-
-                        if (endpoint.superSpeedConfig.valid) {
-                            Log::printfSafe(
-                                "[USB]         SuperSpeed - MaxBurst: %u, MaxStreams: %u, BytesPerInterval: %u\r\n",
-                                endpoint.superSpeedConfig.maxBurst,
-                                endpoint.superSpeedConfig.maxStreams,
-                                endpoint.superSpeedConfig.bytesPerInterval
-                            );
-                        }
-                    }
-
-                    interface = interface->next;
-                }
-
-                function = function->next;
+            else {
+                Log::printfSafe("[USB] Failed to get manufacturer string\r\n");
             }
         }
 
-        return Success();
+        if (descriptor.productDescriptorIndex != 0) {
+            auto product_string_wrapper = GetString(descriptor.productDescriptorIndex, 0x0409);
+
+            if (product_string_wrapper.HasValue()) {
+                Log::printfSafe("[USB] Product String: %s\r\n", product_string_wrapper.GetValue());
+                Heap::Free(product_string_wrapper.GetValue());
+            }
+            else {
+                Log::printfSafe("[USB] Failed to get product string\r\n");
+            }
+        }
+
+        if (descriptor.serialNumberDescriptorIndex != 0) {
+            auto serial_string_wrapper = GetString(descriptor.serialNumberDescriptorIndex, 0x0409);
+
+            if (serial_string_wrapper.HasValue()) {
+                Log::printfSafe("[USB] Serial Number String: %s\r\n", serial_string_wrapper.GetValue());
+                Heap::Free(serial_string_wrapper.GetValue());
+            }
+            else {  
+                Log::printfSafe("[USB] Failed to get serial number string\r\n");
+            }
+        }
+
+        // choose first configuration with known function that can be configured
+        for (size_t i = 0; i < descriptor.configurationsNumber; ++i) {
+            if (configurations[i].valid) {
+                for (FunctionDescriptor* function = configurations[i].functions; function != nullptr; function = function->next) {
+                    if (function->functionClass == HID::Device::GetClassCode()) {
+                        Log::printfSafe("[USB] Found HID function in configuration %u\r\n", i);
+
+                        auto dev = HID::Device::Create(*this);
+
+                        if (dev.HasValue()) {
+                            Log::printfSafe("[USB] HID device created for device %u\r\n", information.slot_id);
+                            return Optional<Device*>(dev.GetValue());
+                        }
+                        else {
+                            Log::printfSafe("[USB] Failed to create HID device for device %u\r\n", information.slot_id);
+                        }
+                    }
+                }
+            }
+        }
+
+        return Optional<Device*>();
     }
 
     void Device::Release() {

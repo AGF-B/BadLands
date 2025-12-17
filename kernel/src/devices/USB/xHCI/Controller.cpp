@@ -138,7 +138,7 @@ namespace Devices::USB::xHCI {
                 case EventTRB::Type::TransferEvent: {
                     const auto& transfer_event = *reinterpret_cast<TransferEventTRB*>(event);
                     const uint8_t slot_id = transfer_event.GetSlotID();
-                    devices[slot_id - 1].SignalTransferComplete(transfer_event);
+                    devices[slot_id - 1]->SignalTransferComplete(transfer_event);
                     break;
                 }
                 case EventTRB::Type::CommandCompletionEvent: {
@@ -264,7 +264,7 @@ namespace Devices::USB::xHCI {
 
         const size_t dcbaa_pages = GetDCBAAPPages();
         
-        devices = static_cast<Device*>(Heap::Allocate(static_cast<size_t>(max_slots_enabled) * sizeof(Device)));
+        devices = static_cast<Device**>(Heap::Allocate(static_cast<size_t>(max_slots_enabled) * sizeof(Device*)));
 
         if (devices == nullptr) {
             return false;
@@ -671,7 +671,7 @@ namespace Devices::USB::xHCI {
 
                         Log::printfSafe("[xHCI] Port 0x%0.2hhx mapped to slot %hhu\n\r", i, ports[i].slot);
 
-                        new (&devices[slot_id - 1]) Device(*this, DeviceInformation{
+                        auto generic_device = Device(*this, DeviceInformation{
                             .route_string = 0,
                             .parent_port = static_cast<uint8_t>(i + 1),
                             .root_hub_port = static_cast<uint8_t>(i + 1),
@@ -680,11 +680,17 @@ namespace Devices::USB::xHCI {
                             .depth = 0
                         });
 
-                        if (!devices[slot_id - 1].Initialize().IsSuccess()) {
+                        devices[slot_id - 1] = &generic_device;
+
+                        auto device = generic_device.Initialize();
+
+                        if (!device.HasValue()) {
                             Log::printfSafe("[xHCI] Failed to initialize device on port 0x%0.2hhx\n\r", i);
                             DisableSlot(ports[i].slot);
                             ports[i].slot = 0;
                         }
+
+                        devices[slot_id - 1] = device.GetValue();
                     }
                 }
             }
