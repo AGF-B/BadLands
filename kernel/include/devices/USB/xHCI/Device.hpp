@@ -122,6 +122,8 @@ namespace Devices {
                     InterfaceDescriptor* nextAlternate  = nullptr;
                     InterfaceDescriptor* next           = nullptr;
 
+                    void AddExtra(DeviceSpecificDescriptor* descriptor);
+                    Optional<DeviceSpecificDescriptor*> GetExtra(uint8_t type);
                     Success AddAlternate(const InterfaceDescriptor& alternate);
                     void Release();
                 };
@@ -175,6 +177,15 @@ namespace Devices {
             private:
                 Optional<uint16_t> GetDefaultMaxPacketSize() const;
                 Success AddressDevice();
+
+                Success FetchDeviceDescriptor();
+                Success FetchConfigurations();
+                Optional<ConfigurationDescriptor> ParseConfigurationDescriptor(uint8_t index);
+                Optional<InterfaceWrapper> ParseInterfaceDescriptor(const uint8_t*& data, const uint8_t* limit);
+                Optional<EndpointDescriptor> ParseEndpointDescriptor(const uint8_t*& data, const uint8_t* limit);
+                Optional<DeviceSpecificDescriptor*> ParseDeviceSpecificDescriptor(const uint8_t*& data, const uint8_t* limit);
+
+            protected:
                 Success InitiateTransfer(const TRB* trb, uint32_t reason);
 
                 static size_t GetDescriptorSize(const void* data);
@@ -189,14 +200,6 @@ namespace Devices {
                     return Success();
                 }
 
-                Success FetchDeviceDescriptor();
-                Success FetchConfigurations();
-                Optional<ConfigurationDescriptor> ParseConfigurationDescriptor(uint8_t index);
-                Optional<InterfaceWrapper> ParseInterfaceDescriptor(const uint8_t*& data, const uint8_t* limit);
-                Optional<EndpointDescriptor> ParseEndpointDescriptor(const uint8_t*& data, const uint8_t* limit);
-                Optional<DeviceSpecificDescriptor*> ParseDeviceSpecificDescriptor(const uint8_t*& data, const uint8_t* limit);
-
-            protected:
                 Controller& controller;
                 const DeviceInformation information;
 
@@ -211,9 +214,21 @@ namespace Devices {
                 DeviceDescriptor descriptor;
                 ConfigurationDescriptor* configurations = nullptr;
 
+                static Success SendRequest(
+                    Device& device,
+                    uint8_t bmRequestType,
+                    uint8_t bRequest,
+                    uint16_t wValue,
+                    uint16_t wIndex,
+                    uint16_t wLength,
+                    uint8_t* buffer)
+                ;
+
                 Optional<uint8_t*> GetDescriptor(uint8_t type, uint8_t index, uint8_t languageID = 0);
                 Success GetDescriptor(uint8_t type, uint8_t index, uint16_t length, uint8_t* buffer, uint8_t languageID = 0);
                 Optional<char*> GetString(uint8_t index, uint16_t languageID = 0);
+
+                Device(const Device&);
 
             public:
                 Device(Controller& controller, const DeviceInformation& information);
@@ -222,7 +237,7 @@ namespace Devices {
                 const void* GetOutputDeviceContext() const;
 
                 Optional<Device*> Initialize();
-                void Release();
+                virtual void Release();
 
                 void SignalTransferComplete(const TransferEventTRB& trb);
 

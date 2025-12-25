@@ -1,5 +1,9 @@
 #include <cstdint>
 
+#include <new>
+
+#include <utility>
+
 #include <shared/LockGuard.hpp>
 #include <shared/Response.hpp>
 
@@ -21,6 +25,31 @@ namespace Devices::USB::xHCI {
         if (endpointType != EndpointType::Invalid) {
             endpointType = EndpointType::Invalid;
         }
+    }
+
+    void Device::InterfaceDescriptor::AddExtra(DeviceSpecificDescriptor* descriptor) {
+        DeviceSpecificDescriptor* current = extra;
+
+        if (current == nullptr) {
+            extra = descriptor;
+        }
+        else {
+            while (current->next != nullptr) {
+                current = current->next;
+            }
+
+            current->next = descriptor;
+        }
+    }
+
+    Optional<Device::DeviceSpecificDescriptor*> Device::InterfaceDescriptor::GetExtra(uint8_t type) {
+        DeviceSpecificDescriptor* current = extra;
+
+        while (current != nullptr && current->descriptorType != type) {
+            current = current->next;
+        }
+
+        return current == nullptr ? Optional<DeviceSpecificDescriptor*>() : Optional<DeviceSpecificDescriptor*>(current);
     }
 
     Success Device::InterfaceDescriptor::AddAlternate(const InterfaceDescriptor& alternate) {
@@ -274,6 +303,67 @@ namespace Devices::USB::xHCI {
         return static_cast<size_t>(header->descriptorType);
     }
 
+    Success Device::SendRequest(
+        Device& device,
+        uint8_t bmRequestType,
+        uint8_t bRequest,
+        uint16_t wValue,
+        uint16_t wIndex,
+        uint16_t wLength,
+        uint8_t* buffer
+    ) {
+        Utils::LockGuard _{device.transfer_lock};
+
+        SetupTRB setup = SetupTRB::Create({
+            .bmRequestType = bmRequestType,
+            .bRequest = bRequest,
+            .wValue = wValue,
+            .wIndex = wIndex,
+            .wLength = wLength,
+            .tranferLength = 8,
+            .interrupterTarget = 0,
+            .cycle = device.control_transfer_ring->GetCycle(),
+            .interruptOnCompletion = false,
+            .transferType = TransferType::DataInStage
+        });
+
+        device.control_transfer_ring->Enqueue(setup);
+
+        DataTRB data = DataTRB::Create({
+            .bufferPointer = VirtualMemory::GetPhysicalAddress(buffer),
+            .transferLength = wLength,
+            .tdSize = 0,
+            .interrupterTarget = 0,
+            .cycle = device.control_transfer_ring->GetCycle(),
+            .evaluateNextTRB = false,
+            .interruptOnShortPacket = false,
+            .noSnoop = false,
+            .chain = false,
+            .interruptOnCompletion = false,
+            .immediateData = false,
+            .direction = true
+        });
+
+        device.control_transfer_ring->Enqueue(data);
+
+        StatusTRB status = StatusTRB::Create({
+            .interrupterTarget = 0,
+            .cycle = device.control_transfer_ring->GetCycle(),
+            .evaluateNextTRB = false,
+            .chain = false,
+            .interruptOnCompletion = true,
+            .direction = false
+        });
+
+        const auto* ptr = device.control_transfer_ring->Enqueue(status);
+
+        if (!device.InitiateTransfer(ptr, 1).IsSuccess() || device.transfer_result.GetCompletionCode() != TRB::CompletionCode::Success) {
+            return Failure();
+        }
+
+        return Success();
+    }
+
     Optional<uint8_t*> Device::GetDescriptor(uint8_t type, uint8_t index, uint8_t languageID) {
         RawDescriptorHeader header;
         
@@ -298,56 +388,18 @@ namespace Devices::USB::xHCI {
     }
 
     Success Device::GetDescriptor(uint8_t type, uint8_t index, uint16_t length, uint8_t* buffer, uint8_t languageID) {
-        Utils::LockGuard _{transfer_lock};
-
-        SetupTRB setup = SetupTRB::Create({
-            .bmRequestType = 0x80,
-            .bRequest = 6,
-            .wValue = static_cast<uint16_t>((static_cast<uint16_t>(type) << 8) | index),
-            .wIndex = static_cast<uint16_t>(languageID),
-            .wLength = static_cast<uint16_t>(length),
-            .tranferLength = 8,
-            .interrupterTarget = 0,
-            .cycle = control_transfer_ring->GetCycle(),
-            .interruptOnCompletion = false,
-            .transferType = TransferType::DataInStage
-        });
-
-        control_transfer_ring->Enqueue(setup);
-
-        DataTRB data = DataTRB::Create({
-            .bufferPointer = VirtualMemory::GetPhysicalAddress(buffer),
-            .transferLength = length,
-            .tdSize = 0,
-            .interrupterTarget = 0,
-            .cycle = control_transfer_ring->GetCycle(),
-            .evaluateNextTRB = false,
-            .interruptOnShortPacket = false,
-            .noSnoop = false,
-            .chain = false,
-            .interruptOnCompletion = false,
-            .immediateData = false,
-            .direction = true
-        });
-
-        control_transfer_ring->Enqueue(data);
-
-        StatusTRB status = StatusTRB::Create({
-            .interrupterTarget = 0,
-            .cycle = control_transfer_ring->GetCycle(),
-            .evaluateNextTRB = false,
-            .chain = false,
-            .interruptOnCompletion = true,
-            .direction = false
-        });
-
-        const auto* ptr = control_transfer_ring->Enqueue(status);
-
-        if (!InitiateTransfer(ptr, 1).IsSuccess() || transfer_result.GetCompletionCode() != TRB::CompletionCode::Success) {
-            return Failure();
-        }
-
-        return Success();
+        static constexpr uint8_t REQUEST_TYPE_STANDARD_IN = 0x80;
+        static constexpr uint8_t REQUEST_GET_DESCRIPTOR = 6;
+        
+        return SendRequest(
+            *this,
+            REQUEST_TYPE_STANDARD_IN,
+            REQUEST_GET_DESCRIPTOR,
+            static_cast<uint16_t>((static_cast<uint16_t>(type) << 8) | index),
+            static_cast<uint16_t>(languageID),
+            static_cast<uint16_t>(length),
+            buffer
+        );
     }
 
     Optional<char*> Device::GetString(uint8_t index, uint16_t languageID) {
@@ -687,20 +739,9 @@ namespace Devices::USB::xHCI {
                     auto extra_wrapper = ParseDeviceSpecificDescriptor(data, limit);
 
                     if (extra_wrapper.HasValue()) {
-                        DeviceSpecificDescriptor* extra = extra_wrapper.GetValue();
+                        auto* const extra = extra_wrapper.GetValue();
 
-                        if (interface_descriptor.extra == nullptr) {
-                            interface_descriptor.extra = extra;
-                        }
-                        else {
-                            DeviceSpecificDescriptor* current = interface_descriptor.extra;
-
-                            while (current->next != nullptr) {
-                                current = current->next;
-                            }
-
-                            current->next = extra;
-                        }
+                        interface_descriptor.AddExtra(extra);
 
                         Log::printfSafe(
                             "[USB] Parsed extra descriptor (type 0x%0.2hhx) for interface %u.%u\r\n",
@@ -948,7 +989,7 @@ namespace Devices::USB::xHCI {
         const uint8_t length = data[0];
         const uint8_t descriptorType = data[1];
 
-        DeviceSpecificDescriptor* descriptor = reinterpret_cast<DeviceSpecificDescriptor*>(Heap::Allocate(length));
+        DeviceSpecificDescriptor* descriptor = reinterpret_cast<DeviceSpecificDescriptor*>(Heap::Allocate(length - 2 + sizeof(DeviceSpecificDescriptor)));
 
         if (descriptor == nullptr) {
             data += length;
@@ -958,11 +999,18 @@ namespace Devices::USB::xHCI {
         descriptor->descriptorType = descriptorType;
         descriptor->length = length;
         descriptor->next = nullptr;
-        Utils::memcmp(descriptor->data, data + 2, length - 2);
+        Utils::memcpy(descriptor->data, data + 2, length - 2);
 
         data += length;
 
         return Optional<DeviceSpecificDescriptor*>(descriptor);
+    }
+
+    Device::Device(const Device& device) : controller{device.controller}, information{device.information} {
+        this->context_wrapper = std::move(device.context_wrapper);
+        this->control_transfer_ring = std::move(device.control_transfer_ring);
+        this->descriptor = std::move(device.descriptor);
+        this->configurations = std::move(device.configurations);
     }
 
     Device::Device(Controller& controller, const DeviceInformation& information)
@@ -1099,7 +1147,7 @@ namespace Devices::USB::xHCI {
                     if (function->functionClass == HID::Device::GetClassCode()) {
                         Log::printfSafe("[USB] Found HID function in configuration %u\r\n", i);
 
-                        auto dev = HID::Device::Create(*this);
+                        auto dev = HID::Device::Create(*this, function);
 
                         if (dev.HasValue()) {
                             Log::printfSafe("[USB] HID device created for device %u\r\n", information.slot_id);
@@ -1113,7 +1161,17 @@ namespace Devices::USB::xHCI {
             }
         }
 
-        return Optional<Device*>();
+        Log::printfSafe("[USB] No suitable functions found for device %u\r\n", information.slot_id);
+
+        Device* ptr = reinterpret_cast<Device*>(Heap::Allocate(sizeof(Device)));
+
+        if (ptr == nullptr) {
+            Release();
+            return Optional<Device*>();
+        }
+
+        new (ptr) Device(*this);
+        return Optional<Device*>(ptr);
     }
 
     void Device::Release() {
