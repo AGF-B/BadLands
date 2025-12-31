@@ -25,6 +25,7 @@ add_library(KERNEL_SVC STATIC
 
 add_library(xHCI_USB STATIC
     "src/devices/USB/HID/Device.cpp"
+    "src/devices/USB/HID/Keyboard.cpp"
     "src/devices/USB/xHCI/Controller.cpp"
     "src/devices/USB/xHCI/Device.cpp"
     "src/devices/USB/xHCI/Specification.cpp"

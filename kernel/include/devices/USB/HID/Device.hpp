@@ -49,7 +49,9 @@ namespace Devices {
 
                 static inline constexpr uint8_t HID_REPORT_DESCRIPTOR_TYPE = 0x22;
 
-                Device(const xHCI::Device& device);
+                HIDHierarchy hierarchy;
+
+                Device(const xHCI::Device& device, const HIDHierarchy& hierarchy);
                 
                 static Optional<HIDDescriptor> GetHIDDescriptor(InterfaceDescriptor* interface);
                 static Optional<HIDDescriptor> ParseHIDDescriptor(const uint8_t* data, size_t length);
@@ -78,7 +80,7 @@ namespace Devices {
                     const size_t length;
                     size_t position;
                 };
-
+            
                 class ReportParser {
                 public:
                     using Item = ReportDescriptor::Item;
@@ -118,17 +120,15 @@ namespace Devices {
                         return localState;
                     }
 
-                    Optional<GlobalEvent> HandleGlobalItem(const Item& item);
+                    Optional<GlobalEvent> HandleGlobalItem(const Item& item, InterfaceDevice* device);
                     Success HandleLocalItem(const Item& item, InterfaceDevice* device);
                     Optional<HIDHierarchy> Parse();
 
                 private:
                     static constexpr uint8_t GENERIC_DESKTOP_CONTROLS   = 0x1;
-                    static constexpr uint8_t KEYBOARD_KEYPAD            = 0x7;
 
                     static constexpr uint8_t SUPPORTED_PAGES[] = {
-                        GENERIC_DESKTOP_CONTROLS,
-                        KEYBOARD_KEYPAD
+                        GENERIC_DESKTOP_CONTROLS
                     };
 
                     static constexpr uint8_t GENERIC_KEYBOARD = 0x06;
@@ -171,6 +171,28 @@ namespace Devices {
                     const Device::ReportParser::LocalState& localState;
                 };
 
+                struct IOConfiguration {
+                    bool constant;
+                    bool variable;
+                    bool relative;
+                    bool wrap;
+                    bool nonLinear;
+                    bool noPreferred;
+                    bool nullState;
+                    bool _volatile;
+                    bool bufferedBytes;
+                };
+
+                enum class CollectionType {
+                    Physical,
+                    Application,
+                    Logical,
+                    Report,
+                    NamedArray,
+                    UsageSwitch,
+                    UsageModifier
+                };
+
                 InterfaceDevice(DeviceClass deviceClass) : deviceClass{deviceClass} { }
 
                 virtual void Release() = 0;
@@ -180,11 +202,11 @@ namespace Devices {
                 }
 
                 virtual bool IsUsageSupported(uint32_t page, uint32_t usage) = 0;
-                virtual bool IsReportSupported(uint32_t reportID) = 0;
+                virtual bool IsReportSupported(uint32_t reportID, bool input) = 0;
 
-                virtual Success AddInput(const HIDState& state) = 0;
-                virtual Success AddOutput(const HIDState& state) = 0;
-                virtual Success StartCollection(const HIDState& state) = 0;
+                virtual Success AddInput(const HIDState& state, const IOConfiguration& config) = 0;
+                virtual Success AddOutput(const HIDState& state, const IOConfiguration& config) = 0;
+                virtual Success StartCollection(const HIDState& state, CollectionType type) = 0;
                 virtual Success EndCollection() = 0;
             };
         }

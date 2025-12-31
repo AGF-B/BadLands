@@ -1,6 +1,12 @@
+#include <cstddef>
+#include <cstdint>
+
+#include <new>
+
 #include <shared/Response.hpp>
 
 #include <devices/USB/HID/Device.hpp>
+#include <devices/USB/HID/Keyboard.hpp>
 #include <devices/USB/xHCI/Device.hpp>
 
 #include <mm/Heap.hpp>
@@ -8,7 +14,38 @@
 #include <screen/Log.hpp>
 
 namespace Devices::USB::HID {
-    Device::Device(const xHCI::Device& device) : xHCI::Device(device) { }
+    Device::Device(const xHCI::Device& device, const HIDHierarchy& hierarchy) : xHCI::Device(device), hierarchy{hierarchy} { }
+
+    Success Device::HIDHierarchy::AddDevice(InterfaceDevice* device) {
+        auto* const raw = Heap::Allocate(sizeof(Node));
+
+        if (raw == nullptr) {
+            return Failure();
+        }
+
+        auto* const node = new (raw) Node;
+
+        node->device = device;
+        node->next = head;
+        
+        head = node;
+
+        return Success();
+    }
+
+    Optional<InterfaceDevice*> Device::HIDHierarchy::GetDevice(DeviceClass deviceClass) const {
+        Node* current = head;
+
+        while (current != nullptr) {
+            if (current->device != nullptr && current->device->GetDeviceClass() == deviceClass) {
+                return Optional<InterfaceDevice*>(current->device);
+            }
+
+            current = current->next;
+        }
+
+        return Optional<InterfaceDevice*>();
+    }
 
     void Device::HIDHierarchy::Release() {
         Node* current = head;
@@ -131,7 +168,7 @@ namespace Devices::USB::HID {
         });
     }
 
-    Optional<Device::ReportParser::GlobalEvent> Device::ReportParser::HandleGlobalItem(const Item& item) {
+    Optional<Device::ReportParser::GlobalEvent> Device::ReportParser::HandleGlobalItem(const Item& item, InterfaceDevice* device) {
         if (item.type != ItemType::Global) {
             return Optional<GlobalEvent>();
         }
@@ -151,6 +188,13 @@ namespace Devices::USB::HID {
                     return Optional(GlobalEvent::PAGE_CHANGED);
                 }
             }
+
+            if (device != nullptr) {
+                if (device->IsUsageSupported(item.value, 0)) {
+                    return Optional(GlobalEvent::PAGE_CHANGED);
+                }
+            }
+
             return Optional<GlobalEvent>();
         case LOGICAL_MINIMUM:
             globalState.logicalMinimum = item.value;
@@ -214,16 +258,10 @@ namespace Devices::USB::HID {
         auto item_wrapper = descriptor.GetNextItem();
 
         while (item_wrapper.HasValue()) {
-            Log::printfSafe("[HID] Parsing item - Type: %u, Tag: 0x%0.2hhx, Value: 0x%0.8x\n\r",
-                static_cast<uint8_t>(item_wrapper.GetValue().type),
-                item_wrapper.GetValue().tag,
-                item_wrapper.GetValue().value
-            );
-
             const auto item = item_wrapper.GetValue();
 
             if (item.type == ItemType::Global) {
-                auto global_event_wrapper = HandleGlobalItem(item);
+                auto global_event_wrapper = HandleGlobalItem(item, device);
 
                 if (!global_event_wrapper.HasValue()) {
                     Log::printfSafe("[HID] Unsupported global item - Tag: 0x%0.2hhx, Value: 0x%0.8x\n\r", item.tag, item.value);
@@ -244,7 +282,31 @@ namespace Devices::USB::HID {
                     if (device == nullptr) {
                         if (globalState.usagePage == GENERIC_DESKTOP_CONTROLS) {
                             if (localState.usage == GENERIC_KEYBOARD) {
-                                /// TODO: create keyboard device
+                                auto fetched = hierarchy.GetDevice(DeviceClass::KEYBOARD);
+
+                                if (!fetched.HasValue()) {
+                                    auto* const raw = Heap::Allocate(sizeof(Keyboard));
+
+                                    if (raw == nullptr) {
+                                        Log::printfSafe("[HID] Could not allocate memory for Keyboard device\n\r");
+                                        hierarchy.Release();
+                                        return Optional<HIDHierarchy>();
+                                    }
+
+                                    auto* const dev = new (raw) Keyboard;
+
+                                    if (!hierarchy.AddDevice(dev).IsSuccess()) {
+                                        Log::printfSafe("[HID] Could not add Keyboard device to hierarchy\n\r");
+                                        dev->Release();
+                                        hierarchy.Release();
+                                        return Optional<HIDHierarchy>();
+                                    }
+
+                                    device = dev;
+                                }
+                                else {
+                                    device = fetched.GetValue();
+                                }
                             }
                             else {
                                 Log::printfSafe("[HID] Unsupported generic desktop usage: 0x%0.8x\n\r", localState.usage);
@@ -278,15 +340,27 @@ namespace Devices::USB::HID {
                     .localState = localState
                 };
 
+                const InterfaceDevice::IOConfiguration config {
+                    .constant       = (item.value & 0x01) != 0,
+                    .variable       = (item.value & 0x02) != 0,
+                    .relative       = (item.value & 0x04) != 0,
+                    .wrap           = (item.value & 0x08) != 0,
+                    .nonLinear      = (item.value & 0x10) != 0,
+                    .noPreferred    = (item.value & 0x20) != 0,
+                    .nullState      = (item.value & 0x40) != 0,
+                    ._volatile      = (item.value & 0x80) != 0,
+                    .bufferedBytes  = (item.value & 0x100) != 0
+                };
+
                 switch (item.tag) {
                 case INPUT:
-                    if (!device->AddInput(state).IsSuccess()) {
+                    if (!device->AddInput(state, config).IsSuccess()) {
                         hierarchy.Release();
                         return Optional<HIDHierarchy>();
                     }
                     break;
                 case OUTPUT:
-                    if (!device->AddOutput(state).IsSuccess()) {
+                    if (!device->AddOutput(state, config).IsSuccess()) {
                         hierarchy.Release();
                         return Optional<HIDHierarchy>();
                     }
@@ -295,12 +369,29 @@ namespace Devices::USB::HID {
                     Log::printfSafe("[HID] Device features not yet supported\n\r");
                     hierarchy.Release();
                     return Optional<HIDHierarchy>();
-                case COLLECTION:
-                    if (!device->StartCollection(state).IsSuccess()) {
+                case COLLECTION: {
+                    InterfaceDevice::CollectionType collectionType;
+
+                    switch (item.value) {
+                    case 0x00: collectionType = InterfaceDevice::CollectionType::Physical; break;
+                    case 0x01: collectionType = InterfaceDevice::CollectionType::Application; break;
+                    case 0x02: collectionType = InterfaceDevice::CollectionType::Logical; break;
+                    case 0x03: collectionType = InterfaceDevice::CollectionType::Report; break;
+                    case 0x04: collectionType = InterfaceDevice::CollectionType::NamedArray; break;
+                    case 0x05: collectionType = InterfaceDevice::CollectionType::UsageSwitch; break;
+                    case 0x06: collectionType = InterfaceDevice::CollectionType::UsageModifier; break;
+                    default:
+                        Log::printfSafe("[HID] Unsupported collection type: 0x%0.2hhx\n\r", item.value);
+                        hierarchy.Release();
+                        return Optional<HIDHierarchy>();
+                    }
+
+                    if (!device->StartCollection(state, collectionType).IsSuccess()) {
                         hierarchy.Release();
                         return Optional<HIDHierarchy>();
                     }
                     break;
+                }
                 case END_COLLECTION:
                     if (!device->EndCollection().IsSuccess()) {
                         hierarchy.Release();
@@ -376,9 +467,19 @@ namespace Devices::USB::HID {
 
         Heap::Free(buffer);
 
+        auto* const raw_device = Heap::Allocate(sizeof(Device));
+
+        if (raw_device == nullptr) {
+            Log::printfSafe("[HID] Could not allocate memory for HID device\n\r");
+            hierarchy_wrapper.GetValue().Release();
+            return Optional<Device*>();
+        }
+
+        auto* const hid_device = new (raw_device) Device(device, hierarchy_wrapper.GetValue());
+
         __asm__ volatile("jmp .");
 
-        return Optional<Device*>();
+        return Optional<Device*>(hid_device);
     }
 
     void Device::Release() {
