@@ -191,6 +191,7 @@ namespace Devices::USB::HID {
 
             if (device != nullptr) {
                 if (device->IsUsageSupported(item.value, 0)) {
+                    globalState.usagePage = item.value;
                     return Optional(GlobalEvent::PAGE_CHANGED);
                 }
             }

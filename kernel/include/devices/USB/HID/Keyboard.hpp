@@ -56,15 +56,15 @@ namespace Devices {
             public:
                 inline Keyboard() : InterfaceDevice(DeviceClass::KEYBOARD) { }
 
-                virtual void Release();
+                virtual void Release() override;
 
-                virtual bool IsUsageSupported(uint32_t page, uint32_t usage);
-                virtual bool IsReportSupported(uint32_t reportID, bool input);
+                virtual bool IsUsageSupported(uint32_t page, uint32_t usage) override;
+                virtual bool IsReportSupported(uint32_t reportID, bool input) override;
 
-                virtual Success AddInput(const HIDState& state, const IOConfiguration& config);
-                virtual Success AddOutput(const HIDState& state, const IOConfiguration& config);
-                virtual Success StartCollection(const HIDState& state, CollectionType type);
-                virtual Success EndCollection();
+                virtual Success AddInput(const HIDState& state, const IOConfiguration& config) override;
+                virtual Success AddOutput(const HIDState& state, const IOConfiguration& config) override;
+                virtual Success StartCollection(const HIDState& state, CollectionType type) override;
+                virtual Success EndCollection() override;
             };
         }
     }
