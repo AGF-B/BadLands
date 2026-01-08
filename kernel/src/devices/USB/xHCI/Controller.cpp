@@ -691,6 +691,13 @@ namespace Devices::USB::xHCI {
                         }
 
                         devices[slot_id - 1] = device.GetValue();
+
+                        if (!devices[slot_id - 1]->PostInitialization().IsSuccess()) {
+                            Log::printfSafe("[xHCI] Post-initialization failed for device on port 0x%0.2hhx\n\r", i);
+                            devices[slot_id - 1]->Release();
+                            DisableSlot(ports[i].slot);
+                            ports[i].slot = 0;
+                        }
                     }
                 }
             }
@@ -1059,6 +1066,14 @@ namespace Devices::USB::xHCI {
         doorbell_regs->r[device.GetInformation().slot_id] = reason;
 
         return Success();
+    }
+
+    Optional<uint8_t> Controller::GetPortProtocol(uint8_t port_id) const {
+        if (port_id == 0 || port_id > GetMaxPorts()) {
+            return Optional<uint8_t>();
+        }
+
+        return Optional<uint8_t>(ports[port_id - 1].major);
     }
 
     void Controller::Destroy() {

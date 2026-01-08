@@ -1,5 +1,7 @@
 #pragma once
 
+#define  KEYPOINT(row, column) ((row & 0x07) | ((column) & 0x1F) << 3)
+
 // Virtual keycodes (same as Microsoft Windows ones)
 
 #define VK_INVALID                  0x00

@@ -152,15 +152,18 @@ namespace {
 
 Kernel::KernelExports Kernel::Exports = {
     .vfs = nullptr,
-    .deviceInterface = nullptr
+    .deviceInterface = nullptr,
+    .keyboardMultiplexerInterface = nullptr
 };
 
 void BootProcessorInit() {
-    auto* keyboardBuffer = Devices::KeyboardDispatcher::Initialize(Kernel::Exports.deviceInterface);
+    auto* const keyboardMultiplexer = Devices::KeyboardDispatcher::Initialize(Kernel::Exports.deviceInterface);
 
-    //Services::Shell::Entry();
+    Kernel::Exports.keyboardMultiplexerInterface = keyboardMultiplexer;
 
     PCI::Enumerate();
+
+    Services::Shell::Entry();
 
     while (1) {
         __asm__ volatile("hlt");

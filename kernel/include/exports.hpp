@@ -6,6 +6,7 @@ namespace Kernel {
     struct KernelExports {
         VFS* vfs;
         FS::IFNode* deviceInterface;
+        FS::IFNode* keyboardMultiplexerInterface;
     };
 
     extern KernelExports Exports;

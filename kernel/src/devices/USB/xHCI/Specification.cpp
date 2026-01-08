@@ -56,6 +56,14 @@ namespace Devices::USB::xHCI {
         return value != speed;
     }
 
+    SlotState::SlotState(const decltype(Invalid)& state) {
+        value = state;
+    }
+
+    SlotState::operator decltype(Invalid) () const {
+        return value;
+    }
+
     SlotState SlotState::FromSlotState(uint8_t state) {
         switch (state) {
             case 0: return SlotState { DisabledEnabled };
@@ -115,6 +123,24 @@ namespace Devices::USB::xHCI {
 
     void SlotContext::SetRootHubPort(uint8_t port) {
         data[1] = ModifyPacked(data[1], ROOT_HUB_PORT_MASK, ROOT_HUB_PORT_SHIFT, port);
+    }
+
+    SlotState SlotContext::GetSlotState() const {
+        return SlotState::FromSlotState(
+            GetPacked<uint32_t, uint8_t>(data[3], SLOT_STATE_MASK, SLOT_STATE_SHIFT)
+        );
+    }
+
+    void SlotContext::ResetSlotState() {
+        data[3] = ModifyPacked(data[3], SLOT_STATE_MASK, SLOT_STATE_SHIFT, 0);
+    }
+
+    EndpointState::EndpointState(const decltype(Invalid)& state) {
+        value = state;
+    }
+
+    EndpointState::operator decltype(Invalid) () const {
+        return value;
     }
 
     EndpointState EndpointState::FromEndpointState(uint8_t state) {
@@ -181,6 +207,22 @@ namespace Devices::USB::xHCI {
 
     bool EndpointType::operator!=(const decltype(Invalid)& type) const {
         return value != type;
+    }
+
+    EndpointState EndpointContext::GetEndpointState() const {
+        const uint8_t raw_state = GetPacked<uint32_t, uint8_t>(data[0], STATE_MASK, STATE_SHIFT);
+
+        switch (raw_state) {
+            case 0: return EndpointState::Disabled;
+            case 1: return EndpointState::Running;
+            case 2: return EndpointState::Halted;
+            case 3: return EndpointState::Stopped;
+            case 4: return EndpointState::Error;
+            case 5:
+            case 6:
+            case 7: return EndpointState::Reserved;
+            default: return EndpointState::Invalid;
+        }
     }
 
     uint8_t EndpointContext::GetMult() const {
@@ -261,6 +303,14 @@ namespace Devices::USB::xHCI {
         const uint32_t address_hi = static_cast<uint32_t>((address >> 32));
         data[2] = ModifyPacked(data[2], TR_DEQUEUE_POINTER_LO_MASK, 0, address_lo);
         data[3] = address_hi;
+    }
+
+    uint16_t EndpointContext::GetAverageTRBLength() const {
+        return GetPacked<uint32_t, uint16_t>(data[4], AVERAGE_TRB_LENGTH_MASK, AVERAGE_TRB_LENGTH_SHIFT);
+    }
+
+    void EndpointContext::SetAverageTRBLength(uint16_t length) {
+        data[4] = ModifyPacked<uint32_t, uint16_t>(data[4], AVERAGE_TRB_LENGTH_MASK, AVERAGE_TRB_LENGTH_SHIFT, length);
     }
 
     void InputControlContext::SetDropContext(uint8_t id) {

@@ -150,6 +150,27 @@ namespace Devices::USB::xHCI {
         return trb;
     }
 
+    ConfigureEndpointTRB ConfigureEndpointTRB::Create(bool cycle, bool dc, uint8_t slot_id, const void* context_pointer) {
+        static constexpr uint8_t    CONFIGURE_ENDPOINT_TYPE = 12;
+        static constexpr uint64_t   CONTEXT_POINTER_MASK    = 0xFFFFFFFFFFFFFFF0;
+        static constexpr uint32_t   DC_FLAG                 = 0x00000200; 
+
+        const uint64_t raw_pointer = reinterpret_cast<uint64_t>(context_pointer) & CONTEXT_POINTER_MASK;
+
+        ConfigureEndpointTRB trb;
+
+        trb.data[0] = static_cast<uint32_t>(raw_pointer);
+        trb.data[1] = static_cast<uint32_t>(raw_pointer >> 32);
+        trb.data[2] = 0;
+        trb.data[3] = dc ? DC_FLAG : 0;
+
+        trb.SetCycle(cycle);
+        trb.SetTRBType(CONFIGURE_ENDPOINT_TYPE);
+        trb.SetSlotID(slot_id);
+
+        return trb;
+    }
+
     LinkTRB LinkTRB::Create(bool cycle, TRB* next) {
         static constexpr uint8_t LINK_TYPE = 6;
         static constexpr uint64_t NEXT_MASK = 0xFFFFFFFFFFFFFFF0;
@@ -277,6 +298,37 @@ namespace Devices::USB::xHCI {
 
     constexpr bool TransferType::operator!=(const decltype(Invalid)& type) const {
         return value != type;
+    }
+
+    NormalTRB NormalTRB::Create(const NormalDescriptor& descriptor) {
+        static constexpr uint8_t NORMAL_TYPE = 1;
+        static constexpr uint32_t BEI_FLAG = 0x00000200;
+
+        NormalTRB trb;
+
+        trb.data[0] = 0;
+        trb.data[1] = 0;
+        trb.data[2] = 0;
+        trb.data[3] = 0;
+
+        trb.SetDataBufferPointer(descriptor.bufferPointer);
+        trb.SetTRBTransferLength(descriptor.transferLength);
+        trb.SetTDSize(descriptor.tdSize);
+        trb.SetInterrupterTarget(descriptor.interrupterTarget);
+        trb.SetCycle(descriptor.cycle);
+        trb.SetENT(descriptor.evaluateNextTRB);
+        trb.SetISP(descriptor.interruptOnShortPacket);
+        trb.SetNoSnoop(descriptor.noSnoop);
+        trb.SetChain(descriptor.chain);
+        trb.SetInterruptOnCompletion(descriptor.interruptOnCompletion);
+        trb.SetImmediateData(descriptor.immediateData);
+        trb.SetTRBType(NORMAL_TYPE);
+        
+        if (descriptor.blockEventInterrupt) {
+            trb.data[3] |= BEI_FLAG;
+        }
+
+        return trb;
     }
 
     constexpr void SetupTRB::SetRequestType(uint8_t bmRequestType) {

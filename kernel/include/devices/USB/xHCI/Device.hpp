@@ -214,6 +214,9 @@ namespace Devices {
                 DeviceDescriptor descriptor;
                 ConfigurationDescriptor* configurations = nullptr;
 
+                static constexpr size_t MAX_ENDPOINT_TRANSFER_RINGS = 15 * 2;
+                TransferRing* endpoint_transfer_rings[MAX_ENDPOINT_TRANSFER_RINGS] = { nullptr };
+
                 static Success SendRequest(
                     Device& device,
                     uint8_t bmRequestType,
@@ -221,12 +224,18 @@ namespace Devices {
                     uint16_t wValue,
                     uint16_t wIndex,
                     uint16_t wLength,
-                    uint8_t* buffer)
-                ;
+                    uint8_t* buffer
+                );
 
                 Optional<uint8_t*> GetDescriptor(uint8_t type, uint8_t index, uint8_t languageID = 0);
                 Success GetDescriptor(uint8_t type, uint8_t index, uint16_t length, uint8_t* buffer, uint8_t languageID = 0);
                 Optional<char*> GetString(uint8_t index, uint16_t languageID = 0);
+
+                static Success SetConfiguration(Device& device, uint8_t configuration_value);
+                static Success ConfigureEndpoint(Device& device, const EndpointDescriptor& endpoint);
+                static TransferRing* GetEndpointTransferRing(Device& device, uint8_t endpointAddress, bool input);
+
+                static Optional<uint8_t> ConvertEndpointInterval(const Device& device, const EndpointType& type, uint16_t interval);
 
                 Device(const Device&);
 
@@ -237,9 +246,10 @@ namespace Devices {
                 const void* GetOutputDeviceContext() const;
 
                 Optional<Device*> Initialize();
+                virtual inline Success PostInitialization() { return Success(); }
                 virtual void Release();
 
-                void SignalTransferComplete(const TransferEventTRB& trb);
+                virtual void SignalTransferComplete(const TransferEventTRB& trb);
 
                 const DeviceDescriptor& GetDeviceDescriptor() const;
             };

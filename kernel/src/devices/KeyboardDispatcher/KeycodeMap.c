@@ -2,8 +2,6 @@
 
 #include <devices/KeyboardDispatcher/Keycodes.h>
 
-#define  KEYPOINT(row, column) ((row & 0x07) | ((column) & 0x1F) << 3)
-
 const uint8_t KeyboardDispatcher_KeycodeMap[8 * 20] = {
     [KEYPOINT(0,  0)] = VK_INVALID,
     [KEYPOINT(0,  1)] = VK_INVALID,

@@ -234,6 +234,8 @@ namespace Devices {
                 void LoadDeviceSlot(const Device& device);
                 Success RingDoorbell(const Device& device, uint32_t reason) const;
 
+                Optional<uint8_t> GetPortProtocol(uint8_t port_id) const;
+
                 void Destroy();
             };
         }

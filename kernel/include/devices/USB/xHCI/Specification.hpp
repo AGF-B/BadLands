@@ -46,6 +46,9 @@ namespace Devices {
 
                 decltype(Default) value;
 
+                SlotState(const decltype(Invalid)& state);
+                operator decltype(Invalid) () const;
+
                 static SlotState FromSlotState(uint8_t state);
 
                 bool operator==(const decltype(Default)& state) const;
@@ -86,6 +89,8 @@ namespace Devices {
                 static constexpr uint8_t    CONTEXT_ENTRIES_SHIFT   = 27;
                 static constexpr uint32_t   ROOT_HUB_PORT_MASK      = 0x00FF0000;
                 static constexpr uint8_t    ROOT_HUB_PORT_SHIFT     = 16;
+                static constexpr uint32_t   SLOT_STATE_MASK         = 0xF8000000;
+                static constexpr uint8_t    SLOT_STATE_SHIFT        = 27;
 
             public:
                 uint32_t GetRouteString() const;
@@ -127,8 +132,8 @@ namespace Devices {
                 uint8_t GetUSBAddress() const = delete;
                 void ResetUSBAddress() = delete;
 
-                SlotState GetSlotState() const = delete;
-                void ResetSlotState() = delete; 
+                SlotState GetSlotState() const;
+                void ResetSlotState(); 
             };
 
             struct SlotContextEx : public ContextEx<SlotContext> {
@@ -149,6 +154,9 @@ namespace Devices {
                 };
 
                 decltype(Invalid) value;
+
+                EndpointState(const decltype(Invalid)& state);
+                operator decltype(Invalid) () const;
 
                 static EndpointState FromEndpointState(uint8_t state);
 
@@ -183,6 +191,8 @@ namespace Devices {
 
             struct EndpointContext : public Context {
             private:
+                static constexpr uint32_t   STATE_MASK                  = 0x00000007;
+                static constexpr uint8_t    STATE_SHIFT                 = 0;
                 static constexpr uint32_t   MULT_MASK                   = 0x00000300;
                 static constexpr uint8_t    MULT_SHIFT                  = 8;
                 static constexpr uint32_t   MAX_PS_STREAMS_MASK         = 0x00007C00;
@@ -200,9 +210,11 @@ namespace Devices {
                 static constexpr uint32_t   DCS_MASK                    = 0x00000001;
                 static constexpr uint8_t    DCS_SHIFT                   = 0;
                 static constexpr uint32_t   TR_DEQUEUE_POINTER_LO_MASK  = 0xFFFFFFF0;
+                static constexpr uint32_t   AVERAGE_TRB_LENGTH_MASK     = 0x0000FFFF;
+                static constexpr uint8_t    AVERAGE_TRB_LENGTH_SHIFT    = 0;
 
             public:
-                EndpointState GetEndpointState() const = delete;
+                EndpointState GetEndpointState() const;
                 
                 uint8_t GetMult() const;
                 void SetMult(uint8_t mult);
@@ -240,8 +252,8 @@ namespace Devices {
                 const TransferTRB* GetTRDequeuePointer() const;
                 void SetTRDequeuePointer(const TransferTRB* pointer);
 
-                uint16_t GetAverageTRBLength() const = delete;
-                void SetAverageTRBLength(uint16_t length) = delete;
+                uint16_t GetAverageTRBLength() const;
+                void SetAverageTRBLength(uint16_t length);
             };
 
             struct EndpointContextEx : public ContextEx<EndpointContext> {

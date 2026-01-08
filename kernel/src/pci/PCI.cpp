@@ -147,12 +147,6 @@ namespace PCI {
                             if (ptr == nullptr) {
                                 Log::putsSafe("USB xHCI controller initialization failed\n\r");
                             }
-                            else {
-                                
-                            }
-
-                            
-                            __asm__ volatile("jmp .");
                         }
                     }
                 }

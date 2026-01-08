@@ -282,6 +282,7 @@ namespace Devices::USB::xHCI {
         };
 
         transfer_complete.store(false);
+        Utils::memset(&transfer_result.data, 0, sizeof(transfer_result.data));
 
         awaiting_transfer = trb;
         controller.RingDoorbell(*this, reason);
@@ -329,22 +330,24 @@ namespace Devices::USB::xHCI {
 
         device.control_transfer_ring->Enqueue(setup);
 
-        DataTRB data = DataTRB::Create({
-            .bufferPointer = VirtualMemory::GetPhysicalAddress(buffer),
-            .transferLength = wLength,
-            .tdSize = 0,
-            .interrupterTarget = 0,
-            .cycle = device.control_transfer_ring->GetCycle(),
-            .evaluateNextTRB = false,
-            .interruptOnShortPacket = false,
-            .noSnoop = false,
-            .chain = false,
-            .interruptOnCompletion = false,
-            .immediateData = false,
-            .direction = true
-        });
+        if (buffer != nullptr) {
+            DataTRB data = DataTRB::Create({
+                .bufferPointer = VirtualMemory::GetPhysicalAddress(buffer),
+                .transferLength = wLength,
+                .tdSize = 0,
+                .interrupterTarget = 0,
+                .cycle = device.control_transfer_ring->GetCycle(),
+                .evaluateNextTRB = false,
+                .interruptOnShortPacket = false,
+                .noSnoop = false,
+                .chain = false,
+                .interruptOnCompletion = false,
+                .immediateData = false,
+                .direction = true
+            });
 
-        device.control_transfer_ring->Enqueue(data);
+            device.control_transfer_ring->Enqueue(data);
+        }
 
         StatusTRB status = StatusTRB::Create({
             .interrupterTarget = 0,
@@ -440,6 +443,167 @@ namespace Devices::USB::xHCI {
 
         Heap::Free(descriptor_data);
         return Optional<char*>(result_string);
+    }
+
+    Success Device::SetConfiguration(Device& device, uint8_t configuration_value) {
+        static constexpr uint8_t REQUEST_TYPE = 0x00;
+        static constexpr uint8_t REQUEST_SET_CONFIGURATION = 9;
+
+        return SendRequest(
+            device,
+            REQUEST_TYPE,
+            REQUEST_SET_CONFIGURATION,
+            static_cast<uint16_t>(configuration_value),
+            0,
+            0,
+            nullptr
+        );
+    }
+
+    Success Device::ConfigureEndpoint(Device& device, const EndpointDescriptor& endpoint) {
+        auto& context_wrapper = device.context_wrapper;
+
+        if (endpoint.superSpeedConfig.valid) {
+            Log::putsSafe("[USB] SuperSpeed endpoints are not yet supported\n\r");
+            return Failure();
+        }
+
+        const auto& type = endpoint.endpointType;
+
+        const auto interval = ConvertEndpointInterval(device, endpoint.endpointType, endpoint.interval);
+
+        if (!interval.HasValue()) {
+            Log::putsSafe("[USB] Invalid endpoint interval\r\n");
+            return Failure();
+        }
+
+        const bool is_in = type == EndpointType::IsochronousIn ||
+                         type == EndpointType::BulkIn ||
+                         type == EndpointType::InterruptIn;
+        
+        const uint8_t context_index = endpoint.endpointAddress * 2 + (is_in ? 1 : 0);
+
+        auto* const input_control_context = context_wrapper->GetInputControlContext();
+        input_control_context->Reset();
+        input_control_context->SetAddContext(context_index);
+        input_control_context->SetAddContext(0);
+
+        auto* const slot_context = context_wrapper->GetSlotContext(true);
+        const auto context_entries = context_wrapper->GetSlotContext(false)->GetContextEntries();
+
+        slot_context->Reset();
+        slot_context->SetRootHubPort(device.information.root_hub_port);
+        slot_context->SetRouteString(device.information.route_string);
+        slot_context->SetContextEntries(context_index >= context_entries ? context_index : context_entries);
+
+        auto& transfer_ring = device.endpoint_transfer_rings[context_index - 2];
+
+        if (transfer_ring == nullptr) {
+            auto transfer_ring_result = TransferRing::Create(1);
+
+            if (!transfer_ring_result.HasValue()) {
+                Log::printfSafe("[USB] Failed to create endpoint transfer ring for device %u\r\n", device.information.slot_id);
+                return Failure();
+            }
+
+            transfer_ring = transfer_ring_result.GetValue();
+        }
+
+        static constexpr uint8_t MAX_ERRORS = 3;
+
+        const uint16_t average_trb_length = type == EndpointType::ControlBidirectional ? 8 : endpoint.maxPacketSize;
+
+        auto* const ep_context = context_wrapper->GetInputEndpointContext(endpoint.endpointAddress - 1, is_in);
+        ep_context->Reset();
+        ep_context->SetMult(0);
+        ep_context->SetMaxPStreams(0);
+        ep_context->SetInterval(interval.GetValue());
+        ep_context->SetErrorCount(MAX_ERRORS);
+        ep_context->SetEndpointType(endpoint.endpointType);
+        ep_context->SetMaxBurstSize(endpoint.superSpeedConfig.valid ? endpoint.superSpeedConfig.maxBurst : 0);
+        ep_context->SetMaxPacketSize(endpoint.maxPacketSize);
+        ep_context->SetDCS(transfer_ring->GetCycle());
+        ep_context->SetTRDequeuePointer(transfer_ring->GetBase());
+        ep_context->SetAverageTRBLength(average_trb_length);
+
+        const auto command = ConfigureEndpointTRB::Create(
+            device.controller.GetCommandCycle(),
+            false,
+            device.information.slot_id,
+            context_wrapper->GetInputDeviceContextAddress()
+        );
+
+        const auto result = device.controller.SendCommand(command);
+
+        if (!result.HasValue() || result.GetValue().GetCompletionCode() != TRB::CompletionCode::Success) {
+            Log::printfSafe("error: %llu\n\r", result.GetValue().GetCompletionCode());
+            transfer_ring->Release();
+            Heap::Free(transfer_ring);
+            transfer_ring = nullptr;
+            return Failure();
+        }
+
+        return Success();
+    }
+
+    TransferRing* Device::GetEndpointTransferRing(Device& device, uint8_t endpointAddress, bool input) {
+        const uint8_t ep_index = endpointAddress * 2 + (input ? 1 : 0) - 2;
+
+        if (ep_index < MAX_ENDPOINT_TRANSFER_RINGS) {
+            return device.endpoint_transfer_rings[ep_index];
+        }
+
+        return nullptr;
+    }
+
+    Optional<uint8_t> Device::ConvertEndpointInterval(const Device& device, const EndpointType& type, uint16_t interval) {
+        const auto& port_speed = device.information.port_speed;
+
+        static const auto& log2 = [](uint16_t value) {
+            uint16_t result = 0;
+            while (value > 1) {
+                value >>= 1;
+                ++result;
+            }
+            return result;
+        };
+
+        switch (type) {
+            case EndpointType::InterruptIn:
+            case EndpointType::InterruptOut:
+                if (port_speed == PortSpeed::LowSpeed || port_speed == PortSpeed::FullSpeed) {
+                    const auto exp = log2((interval == 0 ? 1 : interval) * 8);
+                    return Optional<uint8_t>(exp < 3 ? 3 : (exp > 10 ? 10 : exp));
+                }
+                else {
+                    const auto exp = interval < 1 ? 1 : (interval > 16 ? 16 : interval);
+                    return Optional<uint8_t>(exp - 1);
+                }
+            case EndpointType::IsochronousIn:
+            case EndpointType::IsochronousOut:
+                if (port_speed == PortSpeed::LowSpeed) {
+                    return Optional<uint8_t>();
+                }
+                else if (port_speed == PortSpeed::FullSpeed) {
+                    const auto exp = interval == 0 ? 1 : (interval > 16 ? 16 : interval);
+                    return Optional<uint8_t>(exp - 1 + 3);
+                }
+                else {
+                    const auto exp = interval == 0 ? 1 : (interval > 16 ? 16 : interval);
+                    return Optional<uint8_t>(exp - 1);
+                }
+            case EndpointType::BulkIn:
+            case EndpointType::BulkOut:
+            case EndpointType::ControlBidirectional:
+                if (port_speed == PortSpeed::HighSpeed && interval != 0) {
+                    return Optional<uint8_t>(log2(interval));
+                }
+                else {
+                    return Optional<uint8_t>(0);
+                }
+            default:
+                return Optional<uint8_t>();
+        }
     }
 
     Success Device::FetchDeviceDescriptor() {
@@ -1011,6 +1175,10 @@ namespace Devices::USB::xHCI {
         this->control_transfer_ring = std::move(device.control_transfer_ring);
         this->descriptor = std::move(device.descriptor);
         this->configurations = std::move(device.configurations);
+
+        for (size_t i = 0; i < MAX_ENDPOINT_TRANSFER_RINGS; ++i) {
+            this->endpoint_transfer_rings[i] = std::move(device.endpoint_transfer_rings[i]);
+        }
     }
 
     Device::Device(Controller& controller, const DeviceInformation& information)
@@ -1147,7 +1315,7 @@ namespace Devices::USB::xHCI {
                     if (function->functionClass == HID::Device::GetClassCode()) {
                         Log::printfSafe("[USB] Found HID function in configuration %u\r\n", i);
 
-                        auto dev = HID::Device::Create(*this, function);
+                        auto dev = HID::Device::Create(*this, configurations[i].configurationValue, function);
 
                         if (dev.HasValue()) {
                             Log::printfSafe("[USB] HID device created for device %u\r\n", information.slot_id);
@@ -1191,6 +1359,14 @@ namespace Devices::USB::xHCI {
             }
             Heap::Free(configurations);
             configurations = nullptr;
+        }
+
+        for (size_t i = 0; i < MAX_ENDPOINT_TRANSFER_RINGS; ++i) {
+            if (endpoint_transfer_rings[i] != nullptr) {
+                endpoint_transfer_rings[i]->Release();
+                Heap::Free(endpoint_transfer_rings[i]);
+                endpoint_transfer_rings[i] = nullptr;
+            }
         }
     }
 

@@ -6,6 +6,8 @@
 #include <shared/Response.hpp>
 
 #include <devices/USB/xHCI/Device.hpp>
+#include <devices/USB/xHCI/Specification.hpp>
+#include <devices/USB/xHCI/TRB.hpp>
 
 namespace Devices {
     namespace USB {
@@ -39,22 +41,44 @@ namespace Devices {
                     };
 
                     Node* head = nullptr;
+                    bool hasMultipleReports = false;
+                    mutable size_t maxReportSize = 0;
 
                 public:
                     inline HIDHierarchy() = default;
+
                     Success AddDevice(InterfaceDevice* device);
                     Optional<InterfaceDevice*> GetDevice(DeviceClass deviceClass) const;
+
+                    inline void SignalMultipleReports() { hasMultipleReports = true; }
+                    inline bool HasMultipleReports() const { return hasMultipleReports; }
+
+                    size_t GetMaxReportSize() const;
+
+                    void SendReport(uint8_t report_id, const uint8_t* data, size_t length);
+
                     void Release();
                 };
 
                 static inline constexpr uint8_t HID_REPORT_DESCRIPTOR_TYPE = 0x22;
 
+                const FunctionDescriptor* function = nullptr;
                 HIDHierarchy hierarchy;
+                uint8_t interrupt_in_ep_address = 0;
+                xHCI::TransferRing* endpoint_ring = nullptr;
+                uint8_t* reportBuffer = nullptr;
+                const xHCI::TRB* last_sent_trb = nullptr;
 
-                Device(const xHCI::Device& device, const HIDHierarchy& hierarchy);
+                Device(const xHCI::Device& device, const FunctionDescriptor* function, const HIDHierarchy& hierarchy, uint8_t* buffer);
+
+                void InitiateTransaction();
+
+                void SoftRelease();
                 
                 static Optional<HIDDescriptor> GetHIDDescriptor(InterfaceDescriptor* interface);
                 static Optional<HIDDescriptor> ParseHIDDescriptor(const uint8_t* data, size_t length);
+
+                void HandleTransactionComplete();
 
             public:
                 class ReportDescriptor {
@@ -152,13 +176,19 @@ namespace Devices {
                     ReportDescriptor& descriptor;
                     GlobalState globalState;
                     LocalState localState;
+
+                    bool hasMultipleReports = false;
                 };
 
                 static inline constexpr uint8_t GetClassCode() { return 0x03; }
                 
-                static Optional<Device*> Create(xHCI::Device& device, const FunctionDescriptor* function);
+                static Optional<Device*> Create(xHCI::Device& device, uint8_t configuration_value, const FunctionDescriptor* function);
 
+                virtual Success PostInitialization() override;
+                
                 virtual void Release() override;
+
+                virtual void SignalTransferComplete(const xHCI::TransferEventTRB& trb) override;
             };
 
             class InterfaceDevice {
@@ -204,10 +234,14 @@ namespace Devices {
                 virtual bool IsUsageSupported(uint32_t page, uint32_t usage) = 0;
                 virtual bool IsReportSupported(uint32_t reportID, bool input) = 0;
 
+                virtual size_t GetMaxReportSize() const = 0;
+
                 virtual Success AddInput(const HIDState& state, const IOConfiguration& config) = 0;
                 virtual Success AddOutput(const HIDState& state, const IOConfiguration& config) = 0;
                 virtual Success StartCollection(const HIDState& state, CollectionType type) = 0;
                 virtual Success EndCollection() = 0;
+
+                virtual void HandleReport(uint8_t report_id, const uint8_t* data, size_t length) = 0;
             };
         }
     }

@@ -118,6 +118,10 @@ namespace Devices {
                 static AddressDeviceTRB Create(bool cycle, bool bsr, uint8_t slot_id, const void* context_pointer);
             };
 
+            struct ConfigureEndpointTRB : public CommandTRB {
+                static ConfigureEndpointTRB Create(bool cycle, bool dc, uint8_t slot_id, const void* context_pointer);
+            };
+
             struct LinkTRB : public CommandTRB {
                 static LinkTRB Create(bool cycle, TRB* next);
             };
@@ -159,6 +163,26 @@ namespace Devices {
 
                 constexpr bool operator==(const decltype(Invalid)& type) const;
                 constexpr bool operator!=(const decltype(Invalid)& type) const;
+            };
+
+            struct NormalTRB : public TransferTRB {
+            public:
+                struct NormalDescriptor {
+                    void* bufferPointer;
+                    uint32_t transferLength;
+                    uint8_t tdSize;
+                    uint16_t interrupterTarget;
+                    bool cycle;
+                    bool evaluateNextTRB;
+                    bool interruptOnShortPacket;
+                    bool noSnoop;
+                    bool chain;
+                    bool interruptOnCompletion;
+                    bool immediateData;
+                    bool blockEventInterrupt;
+                };
+
+                static NormalTRB Create(const NormalDescriptor& descriptor);
             };
 
             struct SetupTRB : public TransferTRB {
