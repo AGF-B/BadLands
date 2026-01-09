@@ -361,47 +361,45 @@ namespace Devices::USB::HID {
                 }
 
                 if (localState.usage != previous_usage) {
-                    if (device == nullptr) {
-                        if (globalState.usagePage == GENERIC_DESKTOP_CONTROLS) {
-                            if (localState.usage == GENERIC_KEYBOARD) {
-                                auto fetched = hierarchy.GetDevice(DeviceClass::KEYBOARD);
+                    if (globalState.usagePage == GENERIC_DESKTOP_CONTROLS) {
+                        if (localState.usage == GENERIC_KEYBOARD && (device == nullptr || device->GetDeviceClass() != DeviceClass::KEYBOARD)) {
+                            auto fetched = hierarchy.GetDevice(DeviceClass::KEYBOARD);
 
-                                if (!fetched.HasValue()) {
-                                    hasMultipleDevices = device != nullptr;
-                                    auto* const raw = Heap::Allocate(sizeof(Keyboard));
+                            if (!fetched.HasValue()) {
+                                hasMultipleDevices = device != nullptr;
+                                auto* const raw = Heap::Allocate(sizeof(Keyboard));
 
-                                    if (raw == nullptr) {
-                                        Log::printfSafe("[HID] Could not allocate memory for Keyboard device\n\r");
-                                        hierarchy.Release();
-                                        return Optional<HIDHierarchy>();
-                                    }
-
-                                    auto* const dev = new (raw) Keyboard;
-
-                                    if (!hierarchy.AddDevice(dev).IsSuccess()) {
-                                        Log::printfSafe("[HID] Could not add Keyboard device to hierarchy\n\r");
-                                        dev->Release();
-                                        hierarchy.Release();
-                                        return Optional<HIDHierarchy>();
-                                    }
-
-                                    device = dev;
+                                if (raw == nullptr) {
+                                    Log::printfSafe("[HID] Could not allocate memory for Keyboard device\n\r");
+                                    hierarchy.Release();
+                                    return Optional<HIDHierarchy>();
                                 }
-                                else {
-                                    device = fetched.GetValue();
+
+                                auto* const dev = new (raw) Keyboard;
+
+                                if (!hierarchy.AddDevice(dev).IsSuccess()) {
+                                    Log::printfSafe("[HID] Could not add Keyboard device to hierarchy\n\r");
+                                    dev->Release();
+                                    hierarchy.Release();
+                                    return Optional<HIDHierarchy>();
                                 }
+
+                                device = dev;
                             }
                             else {
-                                Log::printfSafe("[HID] Unsupported generic desktop usage: 0x%0.8x\n\r", localState.usage);
-                                hierarchy.Release();
-                                return Optional<HIDHierarchy>();
+                                device = fetched.GetValue();
                             }
                         }
                         else {
-                            Log::printfSafe("[HID] Unsupported usage page: 0x%0.8x\n\r", globalState.usagePage);
+                            Log::printfSafe("[HID] Unsupported generic desktop usage: 0x%0.8x\n\r", localState.usage);
                             hierarchy.Release();
                             return Optional<HIDHierarchy>();
                         }
+                    }
+                    else {
+                        Log::printfSafe("[HID] Unsupported usage page: 0x%0.8x\n\r", globalState.usagePage);
+                        hierarchy.Release();
+                        return Optional<HIDHierarchy>();
                     }
                 }
             }

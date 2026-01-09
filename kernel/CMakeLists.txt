@@ -7,8 +7,6 @@ enable_language(ASM_NASM)
 
 add_library(KERNEL_IMG_ASM STATIC
     "../common/src/shared/AtomicImpl.asm"
-    "src/devices/PS2/Controller.asm"
-    "src/devices/PS2/Keyboard_IRQ.asm"
     "src/interrupts/IDTCore.asm"
     "src/interrupts/PIC.asm"
     "src/sched/SchedulerIRQ.asm"
@@ -36,8 +34,8 @@ add_executable(KERNEL_IMG
     "src/acpi/Interface.cpp"
     "src/devices/KeyboardDispatcher/Converter.cpp"
     "src/devices/KeyboardDispatcher/Multiplexer.cpp"
+    "src/devices/PS2/Controller.cpp"
     "src/devices/PS2/Keyboard.cpp"
-    "src/devices/PS2/KeyboardEvent.cpp"
     "src/devices/PS2/Keypoints.cpp"
     "src/fs/IFNode.cpp"
     "src/fs/NPFS.cpp"

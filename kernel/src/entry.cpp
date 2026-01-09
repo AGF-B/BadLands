@@ -96,57 +96,34 @@ namespace {
     }
 
     static inline void SetupPS2Keyboard(FS::IFNode* keyboardMultiplexer) {
-        uint32_t status = 0;
+        Log::putsSafe("[PS/2] Initializing PS/2 platform...\n\r");
 
-        Log::puts("[PS/2] Initializing PS/2 platform...\n\r");
-
-        APIC::MaskIRQ(Devices::PS2::PS2_PORT1_ISA_IRQ_VECTOR);
-
-        if ((status = Devices::PS2::InitializePS2Controller()) != 0) {
-            Log::puts("[PS/2] Controller initialization failed\n\r");
+        if (!Devices::PS2::InitializeController().IsSuccess()) {
+            Log::putsSafe("[PS/2] Controller initialization failed\n\r");
             return;
         }
 
-        Log::puts("[PS/2] Controller initialized\n\r");
+        Log::putsSafe("[PS/2] Controller initialized\n\r");
 
-        if ((status = Devices::PS2::IdentifyPS2Port1()) > 0xFFFF) {
-            Log::puts("[PS/2] Identify failed for device on port 1\n\r");
+        const auto identity = Devices::PS2::IdentifyPort1();
+
+        if (!identity.HasValue()) {
+            Log::putsSafe("[PS/2] Identify failed for device on port 1\n\r");
             return;
         }
 
         auto statusCode = Devices::PS2::InitializeKeyboard(keyboardMultiplexer);
 
         if (statusCode != Devices::PS2::StatusCode::SUCCESS) {
-            Log::puts("[PS/2] Keyboard initialization failed\n\r");
-            Log::puts("[PS/2] No keyboard input will be provided until a USB keyboard is connected\n\r");
+            Log::putsSafe("[PS/2] Keyboard initialization failed\n\r");
+            Log::putsSafe("[PS/2] No keyboard input will be provided until a USB keyboard is connected\n\r");
             return;
         }
 
-        const int vector = Interrupts::ReserveInterrupt();
+        Log::putsSafe("[PS/2] Keyboard input enabled\n\r");
+        Log::putsSafe("[PS/2] Initialization done\n\r");
 
-        if (vector < 0) {
-            Log::puts("[PS/2] Coult not reserve an interrupt for the keyboard\n\r");
-            Log::puts("[PS/2] No keyboard input will be provided\n\r");
-            return;
-        }
-
-        // Interrupts::RegisterIRQ(vector, &Devices::PS2::PS2_IRQ1_Handler, false);
-
-        // APIC::SetupIRQ(Devices::PS2::PS2_PORT1_ISA_IRQ_VECTOR, {
-        //     .InterruptVector = static_cast<uint8_t>(vector),
-        //     .Delivery = APIC::IRQDeliveryMode::FIXED,
-        //     .DestinationMode = APIC::IRQDestinationMode::Logical,
-        //     .Polarity = APIC::IRQPolarity::ACTIVE_HIGH,
-        //     .Trigger = APIC::IRQTrigger::EDGE,
-        //     .Masked = false,
-        //     .Destination = APIC::GetLAPICLogicalID()
-        // });
-
-        // Log::puts("[PS/2] Keyboard IRQ configured\n\r");
-        // Log::puts("[PS/2] Keyboard input enabled\n\r");
-        // Log::puts("[PS/2] Initialization done\n\r");
-
-        Log::puts("[PS/2] Services configured but disabled\n\r");
+        __asm__ volatile("sti");
     }
 }
 
@@ -161,7 +138,9 @@ void BootProcessorInit() {
 
     Kernel::Exports.keyboardMultiplexerInterface = keyboardMultiplexer;
 
-    PCI::Enumerate();
+    SetupPS2Keyboard(keyboardMultiplexer);
+
+    //PCI::Enumerate();
 
     Services::Shell::Entry();
 

@@ -1,5 +1,6 @@
 #include <cstdint>
 
+#include <devices/KeyboardDispatcher/Keypacket.hpp>
 #include <devices/PS2/Keypoints.hpp>
 
 namespace {
@@ -374,6 +375,8 @@ namespace {
 }
 
 namespace Devices::PS2 {
+    static constexpr uint8_t KEY_PRESSED = Devices::KeyboardDispatcher::FLAG_KEY_PRESSED;
+
     EventResponse KeyboardScanCodeSet1Handler(uint8_t byte, BasicKeyPacket* buffer) {
         static enum class state_t {
             DEFAULT,

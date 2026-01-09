@@ -69,42 +69,45 @@ namespace Services {
                 else {
                     if (v.GetValue() > 0) {
                         auto vpkt = Devices::KeyboardDispatcher::GetVirtualKeyPacket(packet);
-                        char c = '\0';
 
-                        switch (vpkt.keycode) {
-                            case VK_A: c = 'a'; break;
-                            case VK_B: c = 'b'; break;
-                            case VK_C: c = 'c'; break;
-                            case VK_D: c = 'd'; break;
-                            case VK_E: c = 'e'; break;
-                            case VK_F: c = 'f'; break;
-                            case VK_G: c = 'g'; break;
-                            case VK_H: c = 'h'; break;
-                            case VK_I: c = 'i'; break;
-                            case VK_J: c = 'j'; break;
-                            case VK_K: c = 'k'; break;
-                            case VK_L: c = 'l'; break;
-                            case VK_M: c = 'm'; break;
-                            case VK_N: c = 'n'; break;
-                            case VK_O: c = 'o'; break;
-                            case VK_P: c = 'p'; break;
-                            case VK_Q: c = 'q'; break;
-                            case VK_R: c = 'r'; break;
-                            case VK_S: c = 's'; break;
-                            case VK_T: c = 't'; break;
-                            case VK_U: c = 'u'; break;
-                            case VK_V: c = 'v'; break;
-                            case VK_W: c = 'w'; break;
-                            case VK_X: c = 'x'; break;
-                            case VK_Y: c = 'y'; break;
-                            case VK_Z: c = 'z'; break;
-                            case VK_SPACE: c = ' '; break;
-                            case VK_RETURN: c = '\n'; break;
-                            case VK_BACK: c = '\b'; break;
-                            default: break;
+                        if (vpkt.flags & Devices::KeyboardDispatcher::FLAG_KEY_PRESSED) {
+                            char c = '\0';
+
+                            switch (vpkt.keycode) {
+                                case VK_A: c = 'a'; break;
+                                case VK_B: c = 'b'; break;
+                                case VK_C: c = 'c'; break;
+                                case VK_D: c = 'd'; break;
+                                case VK_E: c = 'e'; break;
+                                case VK_F: c = 'f'; break;
+                                case VK_G: c = 'g'; break;
+                                case VK_H: c = 'h'; break;
+                                case VK_I: c = 'i'; break;
+                                case VK_J: c = 'j'; break;
+                                case VK_K: c = 'k'; break;
+                                case VK_L: c = 'l'; break;
+                                case VK_M: c = 'm'; break;
+                                case VK_N: c = 'n'; break;
+                                case VK_O: c = 'o'; break;
+                                case VK_P: c = 'p'; break;
+                                case VK_Q: c = 'q'; break;
+                                case VK_R: c = 'r'; break;
+                                case VK_S: c = 's'; break;
+                                case VK_T: c = 't'; break;
+                                case VK_U: c = 'u'; break;
+                                case VK_V: c = 'v'; break;
+                                case VK_W: c = 'w'; break;
+                                case VK_X: c = 'x'; break;
+                                case VK_Y: c = 'y'; break;
+                                case VK_Z: c = 'z'; break;
+                                case VK_SPACE: c = ' '; break;
+                                case VK_RETURN: c = '\n'; break;
+                                case VK_BACK: c = '\b'; break;
+                                default: break;
+                            }
+
+                            Log::putcSafe(c);
                         }
-
-                        Log::putcSafe(c);
                     }
                 }
             }

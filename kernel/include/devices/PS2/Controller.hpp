@@ -2,13 +2,15 @@
 
 #include <cstdint>
 
+#include <shared/Response.hpp>
+
 namespace Devices {
 	namespace PS2 {
-		extern "C" {
-			extern uint32_t InitializePS2Controller();
-			extern uint16_t IdentifyPS2Port1();
-			extern uint32_t SendBytePS2Port1(uint8_t data);
-			extern uint32_t RecvBytePS2Port1();
-		}
+		Success InitializeController();
+		bool ControllerForcesTranslation();
+		bool ControllerForcesPort2Interrupts();
+		Optional<uint16_t> IdentifyPort1();
+		Success SendBytePort1(uint8_t data);
+		Optional<uint8_t> RecvBytePort1();
 	}
 }

@@ -6,6 +6,8 @@
 #include <devices/PS2/Keypoints.hpp>
 
 #include <interrupts/APIC.hpp>
+#include <interrupts/InterruptProvider.hpp>
+#include <interrupts/IDT.hpp>
 
 #include <screen/Log.hpp>
 
@@ -41,48 +43,45 @@ namespace Devices::PS2 {
 		static inline constexpr uint8_t SET_NUMBER_LOCK = 0x02;
 		static inline constexpr uint8_t SET_CAPS_LOCK = 0x04;
 
+		static constexpr uint8_t PS2_PORT1_ISA_IRQ_VECTOR = 1;
+		static constexpr uint8_t PS2_PORT2_ISA_IRQ_VECTOR = 12;
+
 		static inline uint32_t SendCommand(uint8_t command) {
 			for (size_t t = 0; t < MAX_RETRY; ++t) {
-				uint32_t status = SendBytePS2Port1(command);
+				if (SendBytePort1(command).IsSuccess()) {
+					const auto status_wrapper = RecvBytePort1();
 
-				if (status != 0) {
-					continue;
-				}
+					if (status_wrapper.HasValue()) {
+						const uint8_t status = status_wrapper.GetValue();
 
-				status = RecvBytePS2Port1();
-
-				if (status != KBD_RESEND) {
-					return status;
+						if (status != KBD_RESEND) {
+							return status;
+						}
+					}
 				}
 			}
 
 			return INTERNAL_ERROR;
 		}
 
-		static inline unsigned int SendCommandData(uint8_t command, uint8_t data) {
+		static inline uint32_t SendCommandData(uint8_t command, uint8_t data) {
 			for (size_t t = 0; t < MAX_RETRY; ++t) {
-				uint32_t status = SendBytePS2Port1(command);
+				if (SendBytePort1(command).IsSuccess()) {
+					auto status_wrapper = RecvBytePort1();
 
-				if (status != 0) {
-					continue;
-				}
+					if (status_wrapper.HasValue() && status_wrapper.GetValue() == KBD_ACK) {
+						if (SendBytePort1(data).IsSuccess()) {
+							status_wrapper = RecvBytePort1();
 
-				status = RecvBytePS2Port1();
-
-				if (status != KBD_ACK) {
-					continue;
-				}
-
-				status = SendBytePS2Port1(data);
-
-				if (status != 0) {
-					continue;
-				}
-
-				status = RecvBytePS2Port1();
-
-				if (status != KBD_RESEND) {
-					return status;
+							if (status_wrapper.HasValue()) {
+								const uint8_t status = status_wrapper.GetValue();
+								
+								if (status != KBD_RESEND) {
+									return status;
+								}
+							}
+						}
+					}
 				}
 			}
 
@@ -101,13 +100,17 @@ namespace Devices::PS2 {
 				return FATAL_ERROR;
 			}
 			uint32_t status = SendCommand(KBD_RESET);
+
 			if (status != 0) {
 				return HandleInternalError();
 			}
-			status = RecvBytePS2Port1();
-			if (status != RESET_PASSED) {
+
+			const auto status_wrapper = RecvBytePort1();
+
+			if (!status_wrapper.HasValue() || status_wrapper.GetValue() != RESET_PASSED) {
 				return HandleInternalError();
 			}
+
 			return 0;
 		}
 
@@ -135,9 +138,9 @@ namespace Devices::PS2 {
 				return GetScanCodeSet(scanCodeSet);
 			}
 
-			status = RecvBytePS2Port1();
+			const auto scan_code_wrapper = RecvBytePort1();
 
-			if (status > 0xFF) {
+			if (!scan_code_wrapper.HasValue()) {
 				if (HandleInternalError() != 0) {
 					return FATAL_ERROR;
 				}
@@ -147,7 +150,7 @@ namespace Devices::PS2 {
 
 			MitigateInternalError();
 
-			*scanCodeSet = status;
+			*scanCodeSet = scan_code_wrapper.GetValue();
 			return 0;
 		}
 
@@ -242,10 +245,37 @@ namespace Devices::PS2 {
 
 			return 0;
 		}
+
+		EventResponse (*keyboardEventConverter)(uint8_t byte, BasicKeyPacket* buffer);
+		FS::IFNode* keyboardMultiplexer;
+
+		void PS2KeyboardEventHandler(void*, uint64_t) {
+			Optional<uint8_t> byte_wrapper = RecvBytePort1();
+
+			APIC::SendEOI();
+
+			if (byte_wrapper.HasValue()) {
+				const uint8_t byte = byte_wrapper.GetValue();
+
+				BasicKeyPacket packet;
+
+				if (keyboardEventConverter(byte, &packet) == EventResponse::PACKET_CREATED) {
+					keyboardMultiplexer->Write(0, sizeof(BasicKeyPacket), reinterpret_cast<uint8_t*>(&packet));
+				}
+			}
+		}
+
+		void PS2FlushSecondChannel(void*,uint64_t) {
+			RecvBytePort1();
+			APIC::SendEOI();
+		}
+
+		static Interrupts::InterruptTrampoline PS2KeyboardTrampoline(&PS2KeyboardEventHandler);
+		static Interrupts::InterruptTrampoline PS2FlushSecondChannelTrampoline(&PS2FlushSecondChannel);
 	}
 
 	StatusCode InitializeKeyboard(FS::IFNode* keyboardMultiplex) {
-		Log::puts("[PS/2] Initializing keyboard\n\r");
+		Log::putsSafe("[PS/2] Initializing keyboard\n\r");
 
 		// resets LEDs
 		if (ResetLEDS() == FATAL_ERROR) {
@@ -253,69 +283,118 @@ namespace Devices::PS2 {
 			return StatusCode::FATAL_ERROR;
 		}
 
-		Log::puts("[PS/2] Keyboard LEDs reset\n\r");
+		Log::putsSafe("[PS/2] Keyboard LEDs reset\n\r");
 
-		// tries to set scan code set 1, otherwise adapts to the current one
 		unsigned int scanCodeSet = 0;
 
-		if (GetScanCodeSet(&scanCodeSet) == FATAL_ERROR) {
-			Log::puts("[PS/2] Could not query keyboard scan code set\n\r");
-			return StatusCode::FATAL_ERROR;
+		if (ControllerForcesTranslation()) {
+			keyboardEventConverter = &KeyboardScanCodeSet1Handler;
+			Log::putsSafe("[PS/2] PS/2 controller forces translation to scan code set 1\n\r");
 		}
-		else if (scanCodeSet != SCAN_CODE_SET_1) {
-			Log::printf("[PS/2] Detected keyboard scan code set: %u\n\r", scanCodeSet);
-			Log::puts("[PS/2] Trying to set keyboard scan code set 1\n\r");
-
-			if (SetScanCodeSet(SCAN_CODE_SET_1) == FATAL_ERROR) {
-				Log::puts("[PS/2] Could not set keyboard scan code set\n\r");
-				return StatusCode::FATAL_ERROR;
-			}
+		else {
 			if (GetScanCodeSet(&scanCodeSet) == FATAL_ERROR) {
-				Log::puts("[PS/2] Could not verify keyboard scan code set\n\r");
+				Log::putsSafe("[PS/2] Could not query keyboard scan code set\n\r");
 				return StatusCode::FATAL_ERROR;
 			}
-		}
+			
+			// selects the correct scan code converter
+			if (scanCodeSet == SCAN_CODE_SET_1) {
+				keyboardEventConverter = &KeyboardScanCodeSet1Handler;
+			}
+			else if (scanCodeSet == SCAN_CODE_SET_2) {
+				keyboardEventConverter = &KeyboardScanCodeSet2Handler;
+			}
+			else if (scanCodeSet == SCAN_CODE_SET_3) {
+				keyboardEventConverter = &KeyboardScanCodeSet3Handler;
+			}
+			else {
+				// sets scan code set 2 as default
+				if (SetScanCodeSet(SCAN_CODE_SET_2) == FATAL_ERROR) {
+					Log::putsSafe("[PS/2] Could not set keyboard scan code set to 2\n\r");
+				}
+				else if (GetScanCodeSet(&scanCodeSet) == FATAL_ERROR) {
+					Log::putsSafe("[PS/2] Could not query keyboard scan code set\n\r");
+					return StatusCode::FATAL_ERROR;
+				}
+				else if (scanCodeSet == SCAN_CODE_SET_2) {
+					keyboardEventConverter = &KeyboardScanCodeSet2Handler;
+				}
+				else {
+					Log::putsSafe("[PS/2] Detected invalid keyboard scan code set\n\r");
+					return StatusCode::FATAL_ERROR;
+				}
+			}
 
-		Log::printf("[PS/2] Detected keyboard scan code set: %u\n\r", scanCodeSet);
+			Log::printfSafe("[PS/2] Detected keyboard scan code set: %u\n\r", scanCodeSet);
+		}
 
 		// Performs ECHO to check if the device is still responsive
 		if (EchoCheck() == FATAL_ERROR) {
-			Log::puts("[PS/2] Keyboard ECHO check failed\n\r");
+			Log::putsSafe("[PS/2] Keyboard ECHO check failed\n\r");
 			return StatusCode::FATAL_ERROR;
 		}
 
-		Log::puts("[PS/2] Keyboard ECHO check successful\n\r");
-
-		// selects the correct scan code converter
-		if (scanCodeSet == SCAN_CODE_SET_1) {
-			keyboardEventConverter = &KeyboardScanCodeSet1Handler;
-		}
-		else if (scanCodeSet == SCAN_CODE_SET_2) {
-			keyboardEventConverter = &KeyboardScanCodeSet2Handler;
-		}
-		else if (scanCodeSet == SCAN_CODE_SET_3) {
-			keyboardEventConverter = &KeyboardScanCodeSet3Handler;
-		}
-		else {
-			Log::puts("[PS/2] Detected invalid keyboard scan code set\n\r");
-			DisableKeyboard();
-			return StatusCode::FATAL_ERROR;
-		}
-
-		Log::puts("[PS/2] Internal scan code selector initialized\n\r");
+		Log::putsSafe("[PS/2] Keyboard ECHO check successful\n\r");
 
 		// Re-enables keyboard scanning
 		if (EnableScanning() == FATAL_ERROR) {
-			Log::puts("[PS/2] Could not enable keyboard scanning\n\r");
+			Log::putsSafe("[PS/2] Could not enable keyboard scanning\n\r");
 			DisableKeyboard();
 			return StatusCode::FATAL_ERROR;
 		}
 
-		Log::puts("[PS/2] Keyboard scanning enabled\n\r");
+		Log::putsSafe("[PS/2] Keyboard scanning enabled\n\r");
 
 		keyboardMultiplexer = keyboardMultiplex;
 
-		Log::puts("[PS/2] Keyboard initialized\n\r");
+		Log::putsSafe("[PS/2] Keyboard initialized\n\r");
+
+		const int vector = Interrupts::ReserveInterrupt();
+
+        if (vector < 0) {
+            Log::putsSafe("[PS/2] Could not reserve an interrupt for the keyboard\n\r");
+            Log::putsSafe("[PS/2] No keyboard input will be provided\n\r");
+            return StatusCode::FATAL_ERROR;
+        }
+
+		Interrupts::RegisterIRQ(vector, &PS2KeyboardTrampoline);
+
+        APIC::SetupIRQ(PS2_PORT1_ISA_IRQ_VECTOR, {
+            .InterruptVector = static_cast<uint8_t>(vector),
+            .Delivery = APIC::IRQDeliveryMode::FIXED,
+            .DestinationMode = APIC::IRQDestinationMode::Logical,
+            .Polarity = APIC::IRQPolarity::ACTIVE_HIGH,
+            .Trigger = APIC::IRQTrigger::EDGE,
+            .Masked = false,
+            .Destination = APIC::GetLAPICLogicalID()
+        });
+
+		if (ControllerForcesPort2Interrupts()) {
+			const int vector2 = Interrupts::ReserveInterrupt();
+
+			if (vector2 < 0) {
+				Log::putsSafe("[PS/2] Could not reserve an interrupt for the second PS/2 channel\n\r");
+				DisableKeyboard();
+				Interrupts::ReleaseIRQ(vector);
+				return StatusCode::FATAL_ERROR;
+			}
+
+			Interrupts::RegisterIRQ(vector2, &PS2FlushSecondChannelTrampoline);
+
+			APIC::SetupIRQ(PS2_PORT2_ISA_IRQ_VECTOR, {
+				.InterruptVector = static_cast<uint8_t>(vector2),
+				.Delivery = APIC::IRQDeliveryMode::FIXED,
+				.DestinationMode = APIC::IRQDestinationMode::Logical,
+				.Polarity = APIC::IRQPolarity::ACTIVE_HIGH,
+				.Trigger = APIC::IRQTrigger::EDGE,
+				.Masked = false,
+				.Destination = APIC::GetLAPICLogicalID()
+			});
+
+			Log::putsSafe("[PS/2] Created bypass interrupt handler for second PS/2 channel\n\r");
+		}
+
+		Log::printfSafe("[PS/2] Keyboard IRQ mapped to vector 0x%02hhx\n\r", static_cast<uint8_t>(vector));
 
 		return StatusCode::SUCCESS;
 	}

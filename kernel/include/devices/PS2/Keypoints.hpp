@@ -15,13 +15,8 @@ namespace Devices {
 			PACKET_CREATED
 		};
 
-		inline constexpr unsigned int KEY_PRESSED = 0x01;
-
 		EventResponse KeyboardScanCodeSet1Handler(uint8_t byte, BasicKeyPacket* buffer);
 		EventResponse KeyboardScanCodeSet2Handler(uint8_t byte, BasicKeyPacket* buffer);
 		EventResponse KeyboardScanCodeSet3Handler(uint8_t byte, BasicKeyPacket* buffer);
-
-		extern EventResponse(*keyboardEventConverter)(uint8_t byte, BasicKeyPacket* buffer);
-		extern FS::IFNode* keyboardMultiplexer;
 	}
 }

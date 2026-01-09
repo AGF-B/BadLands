@@ -8,7 +8,6 @@ qemu-system-x86_64 \
 -machine q35 \
 -cpu max,host-phys-bits=on,+avx,enforce \
 -device nec-usb-xhci \
--device usb-kbd \
 -device usb-hub \
 -rtc base=localtime \
 -net none \

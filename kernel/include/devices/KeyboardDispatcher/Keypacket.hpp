@@ -12,18 +12,18 @@ namespace Devices {
 		static inline constexpr uint8_t FLAG_RIGHT_SHIFT 	= 0x20;
 		static inline constexpr uint8_t FLAG_RIGHT_ALT   	= 0x40;
 		static inline constexpr uint8_t FLAG_RIGHT_GUI   	= 0x80;
+		static inline constexpr uint8_t FLAG_KEY_PRESSED	= 0x10;
 
 		struct BasicKeyPacket {
 			uint8_t scancode;
 			uint8_t keypoint;
-			uint8_t flags;
-			uint8_t reserved = 0;
+			uint16_t flags;
 		};
 		
 		struct VirtualKeyPacket {
             uint8_t keypoint;
             uint8_t keycode;
-            uint8_t flags;
+            uint16_t flags;
         };
 	}
 }
