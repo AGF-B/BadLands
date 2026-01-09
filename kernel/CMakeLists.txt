@@ -164,6 +164,7 @@ target_link_options(KERNEL_IMG PRIVATE
     -nolibc
     -nostdlib
     -flto
+    -s
 )
 target_link_options(KERNEL_IMG_C PRIVATE
     -Wl,--build-id=none
@@ -171,6 +172,7 @@ target_link_options(KERNEL_IMG_C PRIVATE
     -nolibc
     -nostdlib
     -flto
+    -s
 )
 target_link_options(KERNEL_SVC PRIVATE
     -Wl,--build-id=none
@@ -178,6 +180,7 @@ target_link_options(KERNEL_SVC PRIVATE
     -nolibc
     -nostdlib
     -flto
+    -s
 )
 target_link_options(xHCI_USB PRIVATE
     -Wl,--build-id=none
@@ -185,6 +188,7 @@ target_link_options(xHCI_USB PRIVATE
     -nolibc
     -nostdlib
     -flto
+    -s
 )
 
 target_compile_features(KERNEL_IMG PRIVATE cxx_std_23)
