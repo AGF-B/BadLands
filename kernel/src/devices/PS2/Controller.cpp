@@ -92,7 +92,6 @@ namespace Devices::PS2 {
         // Constants
         static constexpr uint8_t OUTPUT_BUFFER_STATUS   = 0x01;
         static constexpr uint8_t INPUT_BUFFER_STATUS    = 0x02;
-        static constexpr uint8_t PS2_TEST_OK            = 0x55;
         // keeps second channel bits intact, disables interrupts on first channel
         static constexpr uint8_t PS2_CONFIG_MASK        = 0x26;
         static constexpr uint8_t PS2_CONFIG_INT_1       = 0x01;
@@ -269,10 +268,6 @@ namespace Devices::PS2 {
         uint8_t config = ReadConfig();
         config &= PS2_CONFIG_MASK;
         WriteConfig(config);
-
-        if (WaitReadData() != PS2_TEST_OK) {
-            return Failure();
-        }
 
         // Restore configuration
         WriteConfig(config);
