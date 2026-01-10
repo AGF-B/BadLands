@@ -47,9 +47,9 @@
 //  - bit 0: first PS/2 port interrupt (set = enabled, cleared = disabled)
 //  - bit 1: second PS/2 port interrupt (set = enabled, cleared = disabled)
 //  - bit 2: system flag (set = system passed POST, cleared = system failed POST)
-//  - bit 3: reserved (must be 0)
-//  - bit 4: first PS/2 port clock (set = enabled, cleared = disabled)
-//  - bit 5: second PS/2 port clock (set = enabled, cleared = disabled)
+//  - bit 3: reserved (should be 0)
+//  - bit 4: first PS/2 port clock (set = disable, cleared = disabled)
+//  - bit 5: second PS/2 port clock (set = disabled, cleared = disabled)
 //  - bit 6: first PS/2 port translation (set = enabled, cleared = disabled)
 //  - bit 7: reserved (must be 0)
 //
@@ -78,7 +78,6 @@ namespace Devices::PS2 {
         static constexpr uint8_t PS2_ENABLE_PORT_1   = 0xAE;
         static constexpr uint8_t PS2_DISABLE_PORT_2  = 0xA7;
         static constexpr uint8_t PS2_ENABLE_PORT_2   = 0xA8;
-        static constexpr uint8_t PS2_SELF_TEST       = 0xAA;
 
         // PS2 Devices commands
         static constexpr uint8_t PS2_IDENTIFY        = 0xF2;
@@ -270,9 +269,6 @@ namespace Devices::PS2 {
         uint8_t config = ReadConfig();
         config &= PS2_CONFIG_MASK;
         WriteConfig(config);
-
-        // Perform controller self-test
-        SendCommand(PS2_SELF_TEST);
 
         if (WaitReadData() != PS2_TEST_OK) {
             return Failure();
