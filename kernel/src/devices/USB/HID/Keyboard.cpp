@@ -9,9 +9,14 @@
 #include <devices/KeyboardDispatcher/Keypacket.hpp>
 #include <devices/USB/HID/Keyboard.hpp>
 
+#include <sched/Self.hpp>
+
 #include <exports.hpp>
 
 #include <mm/Heap.hpp>
+#include <mm/Utils.hpp>
+
+#include <screen/Log.hpp>
 
 namespace Devices::USB::HID {
     Keyboard::Report* Keyboard::Report::Release() {
@@ -133,6 +138,11 @@ namespace Devices::USB::HID {
         }
 
         collections = nullptr;
+
+        if (last_report != nullptr) {
+            Heap::Free(last_report);
+            last_report = nullptr;
+        }
     }
 
     bool Keyboard::IsUsageSupported(uint32_t page, uint32_t usage) {
@@ -280,6 +290,106 @@ namespace Devices::USB::HID {
         return Success();
     }
 
+    bool Keyboard::WasInLastReport(uint32_t usage) {
+        // check if usage was part of last report
+        if (last_report != nullptr) {
+            Report* report = collections->GetReport(last_report_id, true);
+
+            if (report != nullptr) {
+                Item* currentItem = report->items;
+
+                while (currentItem != nullptr) {
+                    if (!currentItem->isConstant) {
+                        if (currentItem->size == 1) {
+                            for (size_t j = 0; j < currentItem->count; ++j) {
+                                const size_t bit_index = currentItem->offset + j;
+                                const size_t byte_index = bit_index / 8;
+                                const size_t bit_in_byte = bit_index % 8;
+
+                                const bool pressed = (last_report[byte_index] & (1 << bit_in_byte)) != 0;
+
+                                if ((usage == currentItem->usage_minimum + j) && pressed) {
+                                    return true;
+                                }
+                            }
+                        }
+                        else if (currentItem->size == 8) {
+                            for (size_t j = 0; j < currentItem->count; ++j) {
+                                const size_t byte_index = (currentItem->offset / 8) + j;
+                                const uint8_t value = last_report[byte_index];
+
+                                if (usage == value) {
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+
+                    currentItem = currentItem->next;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    bool Keyboard::RepeatableUsage(uint32_t usage, uint8_t flags) {
+        if (flags & (KeyboardDispatcher::FLAG_LEFT_CONTROL |
+                     KeyboardDispatcher::FLAG_RIGHT_CONTROL |
+                     KeyboardDispatcher::FLAG_LEFT_ALT     |
+                     KeyboardDispatcher::FLAG_RIGHT_ALT    |
+                     KeyboardDispatcher::FLAG_LEFT_GUI     |
+                     KeyboardDispatcher::FLAG_RIGHT_GUI)) {
+            return false;
+        }
+
+        // if alphanumeric
+        static constexpr uint32_t USAGE_A = 0x04;
+        static constexpr uint32_t USAGE_0 = 0x27;
+
+        if (usage >= USAGE_A && usage <= USAGE_0) {
+            return true;
+        }
+
+        // if in second range repeatable
+        static constexpr uint32_t USAGE_DEL     = 0x2A;
+        static constexpr uint32_t USAGE_SLASH   = 0x38;
+
+        if (usage >= USAGE_DEL && usage <= USAGE_SLASH) {
+            return true;
+        }
+
+        // if in third repeatable range
+
+        static constexpr uint32_t USAGE_RETURN      = 0x28;
+        static constexpr uint32_t USAGE_PAGE_UP     = 0x4B;
+        static constexpr uint32_t USAGE_PAGE_DOWN   = 0x4E;
+        static constexpr uint32_t DEL_FWD           = 0x4C;
+        static constexpr uint32_t ARROW_RIGHT       = 0x4F;
+        static constexpr uint32_t ARROW_UP          = 0x52;
+
+        if (usage == USAGE_RETURN || usage == USAGE_PAGE_UP || usage == USAGE_PAGE_DOWN || usage == DEL_FWD) {
+            return true;
+        }
+        else if (usage >= ARROW_RIGHT && usage <= ARROW_UP) {
+            return true;
+        }
+
+        // repeatable keypad range
+        static constexpr uint32_t USAGE_KEYPAD_ENTER    = 0x58;
+        static constexpr uint32_t USAGE_KEYPAD_NON_US   = 0x64;
+        static constexpr uint32_t USAGE_KEYPAD_EQUAL    = 0x67;
+
+        if (usage >= USAGE_KEYPAD_ENTER && usage <= USAGE_KEYPAD_NON_US) {
+            return true;
+        }
+        else if (usage == USAGE_KEYPAD_EQUAL) {
+            return true;
+        }
+
+        return false;
+    }
+
     uint8_t& Keyboard::TestAndUpdateFlags(uint32_t usage, uint8_t& flags) {
         static constexpr uint8_t LEFT_CONTROL_USAGE     = 0xE0;
         static constexpr uint8_t LEFT_SHIFT_USAGE       = 0xE1;
@@ -402,10 +512,10 @@ namespace Devices::USB::HID {
                 const BasicKeyPacket packet = {
                     .scancode = static_cast<uint8_t>(usage),
                     .keypoint = GetKeypoint(usage),
-                    .flags = static_cast<uint8_t>(flags)
+                    .flags = static_cast<uint16_t>(flags | KeyboardDispatcher::FLAG_KEY_PRESSED)
                 };
 
-                if (packet.keypoint != VK_INVALID) {
+                if (packet.keypoint != VK_INVALID && !WasInLastReport(usage)) {
                     Kernel::Exports.keyboardMultiplexerInterface->Write(
                         0,
                         sizeof(BasicKeyPacket),
@@ -449,6 +559,10 @@ namespace Devices::USB::HID {
 
                                 const uint32_t usage = currentItem->usage_minimum + j;
 
+                                if (repeating_usage == 0 && !update_flags && pressed && RepeatableUsage(usage, repeating_flags)) {
+                                    repeating_usage = usage;
+                                }
+
                                 internal_flags = HandleKeyUsage(usage, internal_flags, update_flags, pressed);
                             }
                         }
@@ -457,6 +571,10 @@ namespace Devices::USB::HID {
                                 const size_t byte_index = (currentItem->offset / 8) + j;
                                 const uint8_t value = data[byte_index];
 
+                                if (repeating_usage == 0 && !update_flags && RepeatableUsage(value, repeating_flags)) {
+                                    repeating_usage = value;
+                                }
+                                
                                 internal_flags = HandleKeyUsage(value, internal_flags, update_flags, true);
                             }
                         }
@@ -473,10 +591,63 @@ namespace Devices::USB::HID {
     }
 
     void Keyboard::HandleReport(uint8_t report_id, const uint8_t* data, size_t length) {
-        const auto flags = UpdateKeys(report_id, data, length, Optional<uint8_t>());
+        const auto timestamp_ms = Self().GetTimer().GetCountMillis();
 
-        if (flags.HasValue()) {
-            UpdateKeys(report_id, data, length, flags);
+        if (report_id != last_report_id
+            || length != last_report_size
+            || last_report == nullptr
+            || (Utils::memcmp(data, last_report, length) != 0)
+            || repeating_usage == 0
+        ) {
+            if (last_report == nullptr) {
+                last_report = static_cast<uint8_t*>(Heap::Allocate(GetMaxReportSize()));
+
+                if (last_report != nullptr) {
+                    last_report_id = report_id;
+                    last_report_size = length;
+                    Utils::memcpy(last_report, data, length);
+                }
+            }
+
+            repeating_usage = 0;
+            repeating_flags = 0;
+
+            const auto flags = UpdateKeys(report_id, data, length, Optional<uint8_t>());
+
+            if (flags.HasValue()) {
+                repeating_flags = flags.GetValue();
+                UpdateKeys(report_id, data, length, flags);
+            }
+
+            last_change_timestamp = timestamp_ms;
+
+            if (last_report != nullptr) {
+                Utils::memcpy(last_report, data, length);
+                last_report_id = report_id;
+                last_report_size = length;
+            }
+        }
+        else {
+            static constexpr uint64_t REPEAT_DELAY_MS       = 500;
+            static constexpr uint64_t REPEAT_INTERVAL_MS    = 50;
+
+            if (timestamp_ms >= last_change_timestamp + REPEAT_DELAY_MS) {
+                if (timestamp_ms >= last_repeat_timestamp + REPEAT_INTERVAL_MS) {
+                    last_repeat_timestamp = timestamp_ms;
+
+                    const KeyboardDispatcher::BasicKeyPacket packet = {
+                        .scancode = static_cast<uint8_t>(repeating_usage),
+                        .keypoint = GetKeypoint(repeating_usage),
+                        .flags = static_cast<uint16_t>(repeating_flags | KeyboardDispatcher::FLAG_KEY_PRESSED)
+                    };
+
+                    Kernel::Exports.keyboardMultiplexerInterface->Write(
+                        0,
+                        sizeof(KeyboardDispatcher::BasicKeyPacket),
+                        reinterpret_cast<const uint8_t*>(&packet)
+                    );
+                }
+            }
         }
     }
 }

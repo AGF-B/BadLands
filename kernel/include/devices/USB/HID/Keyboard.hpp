@@ -54,8 +54,18 @@ namespace Devices {
 
                 size_t max_report_size = 0;
 
-                Success AddReportItem(const HIDState& state, const IOConfiguration& config, bool input);
+                uint8_t last_report_id = 0;
+                uint8_t* last_report = nullptr;
+                size_t last_report_size = 0;
+                uint64_t last_change_timestamp = 0;
+                uint64_t last_repeat_timestamp = 0;
+                uint32_t repeating_usage = 0;
+                uint8_t repeating_flags = 0;
 
+                Success AddReportItem(const HIDState& state, const IOConfiguration& config, bool input);
+                
+                bool                    WasInLastReport(uint32_t usage);
+                bool                    RepeatableUsage(uint32_t usage, uint8_t flags);
                 uint8_t&                TestAndUpdateFlags(uint32_t usage, uint8_t& flags);
                 uint8_t                 GetKeypoint(uint32_t usage);
                 uint8_t                 HandleKeyUsage(uint32_t usage, uint8_t flags, bool update_flags, bool pressed);

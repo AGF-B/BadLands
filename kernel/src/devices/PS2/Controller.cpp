@@ -5,8 +5,6 @@
 
 #include <devices/PS2/Controller.hpp>
 
-#include <screen/Log.hpp>
-
 // i8042 Status register
 //  - bit 0: output buffer status (set = full, cleared = empty)
 //  - bit 1: input buffer status (set = full, cleared = empty)

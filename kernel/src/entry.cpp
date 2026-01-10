@@ -140,7 +140,7 @@ void BootProcessorInit() {
 
     SetupPS2Keyboard(keyboardMultiplexer);
 
-    //PCI::Enumerate();
+    PCI::Enumerate();
 
     Services::Shell::Entry();
 
