@@ -22,7 +22,9 @@ namespace PhysicalMemory {
 
 	void* AllocateDMA(uint64_t pages);
 	void* Allocate();
+	void* AllocatePages(uint64_t pages);
 
 	StatusCode FreeDMA(void* ptr, uint64_t pages);
 	StatusCode Free(void* ptr);
+	StatusCode FreePages(void* ptr, uint64_t pages);
 }

@@ -235,12 +235,45 @@ void* PhysicalMemory::Allocate() {
 	MemMapBlock* mmb = reinterpret_cast<MemMapBlock*>(VirtualMemoryLayout::PhysicalMemoryMap.start) + storedBlocks - 1;
 
 	void* page = reinterpret_cast<void*>(mmb->physicalAddress + ShdMem::FRAME_SIZE * (--mmb->availablePages));
-
-	if (mmb->availablePages == 0) {
+	
+	while (mmb->availablePages == 0) {
 		--storedBlocks;
 		availableBlockMemory += sizeof(MemMapBlock);
+		--mmb;
 	}
 	availableMemory -= ShdMem::FRAME_SIZE;
+
+	return page;
+}
+
+void* PhysicalMemory::AllocatePages(uint64_t pages) {
+	if (pages == 0 || storedBlocks == 0 || availableMemory < ShdMem::FRAME_SIZE * pages) {
+		return nullptr;
+	}
+
+	MemMapBlock* const mmb_end = reinterpret_cast<MemMapBlock*>(VirtualMemoryLayout::PhysicalMemoryMap.start) + storedBlocks - 1;
+	MemMapBlock* mmb = mmb_end;
+
+	for (size_t i = 0; i < storedBlocks; ++i) {
+		if (mmb->availablePages >= pages) {
+			break;
+		}
+		--mmb;
+	}
+
+	mmb->availablePages -= pages;
+
+	void* page = reinterpret_cast<void*>(mmb->physicalAddress + ShdMem::FRAME_SIZE * (mmb->availablePages));
+
+	availableMemory -= ShdMem::FRAME_SIZE * pages;
+
+	if (mmb == mmb_end) {
+		while (mmb->availablePages == 0) {
+			--storedBlocks;
+			availableBlockMemory += sizeof(MemMapBlock);
+			--mmb;
+		}
+	}
 
 	return page;
 }
@@ -352,5 +385,98 @@ PhysicalMemory::StatusCode PhysicalMemory::Free(void* ptr) {
 	++storedBlocks;
 	availableBlockMemory -= sizeof(MemMapBlock);
 	availableMemory += ShdMem::FRAME_SIZE;
+	return StatusCode::SUCCESS;
+}
+
+PhysicalMemory::StatusCode PhysicalMemory::FreePages(void* ptr, uint64_t pages) {
+	if (pages == 0) {
+		return StatusCode::INVALID_PARAMETER;
+	}
+
+	const uint64_t address = reinterpret_cast<uint64_t>(ptr);
+
+	MemMapBlock* blockPtr = reinterpret_cast<MemMapBlock*>(VirtualMemoryLayout::PhysicalMemoryMap.start) + storedBlocks;
+
+	if (availableBlockMemory == 0) {
+		if (storedBlocks * sizeof(MemMapBlock) >= VirtualMemoryLayout::PhysicalMemoryMap.limit) {
+			return StatusCode::OUT_OF_MEMORY;
+		}
+
+		ShdMem::VirtualAddress mapping = ShdMem::ParseVirtualAddress(blockPtr);
+
+		ShdMem::PML4E* pml4e = VirtualMemory::GetPML4EAddress(mapping.PML4_offset);
+
+		if ((*pml4e & ShdMem::PML4E_PRESENT) == 0) {
+			void* _page = Allocate();
+
+			if (_page == nullptr) {
+				return StatusCode::OUT_OF_MEMORY;
+			}
+
+			*pml4e = (FilterAddress(_page) & ShdMem::PML4E_ADDRESS)
+				| ShdMem::PML4E_READWRITE
+				| ShdMem::PML4E_PRESENT;
+
+			ShdMem::PDPTE* pdpt = VirtualMemory::GetPDPTAddress(mapping.PML4_offset);
+			ShdMem::ZeroPage(pdpt);
+		}
+
+		ShdMem::PDPTE* pdpte = VirtualMemory::GetPDPTEAddress(mapping.PML4_offset, mapping.PDPT_offset);
+
+		if ((*pdpte & ShdMem::PDPTE_PRESENT) == 0) {
+			void* _page = Allocate();
+
+			if (_page == nullptr) {
+				return StatusCode::OUT_OF_MEMORY;
+			}
+
+			*pdpte = (FilterAddress(_page) & ShdMem::PDPTE_ADDRESS)
+				| ShdMem::PDPTE_READWRITE
+				| ShdMem::PDPTE_PRESENT;
+
+			ShdMem::PDE* pd = VirtualMemory::GetPDAddress(mapping.PML4_offset, mapping.PDPT_offset);
+			ShdMem::ZeroPage(pd);
+		}
+
+		ShdMem::PDE* pde = VirtualMemory::GetPDEAddress(mapping.PML4_offset, mapping.PDPT_offset, mapping.PDPT_offset);
+
+		if ((*pde & ShdMem::PDE_PRESENT) == 0) {
+			void* _page = Allocate();
+
+			if (_page == nullptr) {
+				return StatusCode::OUT_OF_MEMORY;
+			}
+
+			*pde = (FilterAddress(_page) & ShdMem::PDE_ADDRESS)
+				| ShdMem::PDE_READWRITE
+				| ShdMem::PDE_PRESENT;
+
+			ShdMem::PTE* pt = VirtualMemory::GetPTAddress(mapping.PML4_offset, mapping.PDPT_offset, mapping.PD_offset);
+			ShdMem::ZeroPage(pt);
+		}
+
+		ShdMem::PTE* pte = VirtualMemory::GetPTEAddress(mapping.PML4_offset, mapping.PDPT_offset, mapping.PD_offset, mapping.PT_offset);
+		void* _page = Allocate();
+		availableBlockMemory += ShdMem::FRAME_SIZE;
+
+		if (_page == nullptr) {
+			*pte = ShdMem::PTE_XD
+				| (FilterAddress(ptr) & ShdMem::PTE_ADDRESS)
+				| ShdMem::PTE_READWRITE
+				| ShdMem::PTE_PRESENT;
+			--pages;
+		}
+
+		*pte = ShdMem::PTE_XD
+			| (FilterAddress(_page) & ShdMem::PTE_ADDRESS)
+			| ShdMem::PTE_READWRITE
+			| ShdMem::PTE_PRESENT;
+	}
+
+	blockPtr->availablePages = pages;
+	blockPtr->physicalAddress = address;
+	++storedBlocks;
+	availableBlockMemory -= sizeof(MemMapBlock);
+	availableMemory += ShdMem::FRAME_SIZE * pages;
 	return StatusCode::SUCCESS;
 }
