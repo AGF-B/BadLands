@@ -52,24 +52,34 @@ namespace Devices {
                 ReportCollection* collections       = nullptr;
                 ReportCollection* currentCollection = nullptr;
 
-                size_t max_report_size = 0;
+                mutable size_t max_report_size = 0;
 
-                uint8_t last_report_id = 0;
-                uint8_t* last_report = nullptr;
-                size_t last_report_size = 0;
-                uint64_t last_change_timestamp = 0;
-                uint64_t last_repeat_timestamp = 0;
-                uint32_t repeating_usage = 0;
-                uint8_t repeating_flags = 0;
+                static inline constexpr size_t BITMAP_SIZE          = 256;
+                static inline constexpr size_t BITMAP_ENTRY_BITS    = 64;
+                static inline constexpr size_t BITMAP_ENTRIES       = BITMAP_SIZE / BITMAP_ENTRY_BITS;
+
+                static inline constexpr size_t KEY_REPEAT_DELAY_MS  = 500;
+                static inline constexpr size_t KEY_REPEAT_RATE_MS   = 50;
+
+                uint64_t current_keys_bitmap[BITMAP_ENTRIES] = { 0 };
+                uint64_t previous_keys_bitmap[BITMAP_ENTRIES] = { 0 };
+
+                uint64_t keys_press_timestamp[BITMAP_SIZE] = { 0 };
+                uint64_t keys_repeat_timestamp[BITMAP_SIZE] = { 0 };
 
                 Success AddReportItem(const HIDState& state, const IOConfiguration& config, bool input);
                 
-                bool                    WasInLastReport(uint32_t usage);
-                bool                    RepeatableUsage(uint32_t usage, uint8_t flags);
-                uint8_t&                TestAndUpdateFlags(uint32_t usage, uint8_t& flags);
-                uint8_t                 GetKeypoint(uint32_t usage);
-                uint8_t                 HandleKeyUsage(uint32_t usage, uint8_t flags, bool update_flags, bool pressed);
-                Optional<uint8_t>       UpdateKeys(uint8_t report_id, const uint8_t* data, size_t length, const Optional<uint8_t>& flags);
+                bool                    KeyStateChanged(uint32_t usage) const;
+                void                    SetKeyPressed(uint32_t usage);
+                void                    RollBitmapsOver();
+                static bool             RepeatableUsage(uint32_t usage);
+                uint8_t                 GetKeypoint(uint32_t usage) const;
+                void                    HandleKeyUsage(uint32_t usage, bool pressed);
+                uint8_t                 GetKeyFlags() const;  
+                void                    OnKeyPressed(uint32_t usage, uint8_t flags, uint64_t timestamp);
+                void                    OnKeyReleased(uint32_t usage, uint8_t flags);
+                void                    OnKeyHeld(uint32_t usage, uint8_t flags, uint64_t timestamp);
+                void                    UpdateKeys(uint8_t report_id, const uint8_t* data, size_t length);
 
             public:
                 inline Keyboard() : InterfaceDevice(DeviceClass::KEYBOARD) { }

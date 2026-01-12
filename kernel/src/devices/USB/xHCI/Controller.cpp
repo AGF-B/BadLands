@@ -363,6 +363,8 @@ namespace Devices::USB::xHCI {
     }
 
     void Controller::SignalCommand() const {
+        __asm__ volatile("mfence" ::: "memory");
+        __asm__ volatile("lfence" ::: "memory");
         doorbell_regs->r[0] = 0;
     }
 
@@ -1063,6 +1065,8 @@ namespace Devices::USB::xHCI {
             return Failure();
         }
 
+        __asm__ volatile("mfence" ::: "memory");
+        __asm__ volatile("lfence" ::: "memory");
         doorbell_regs->r[device.GetInformation().slot_id] = reason;
 
         return Success();

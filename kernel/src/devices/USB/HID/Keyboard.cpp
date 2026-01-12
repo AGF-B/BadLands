@@ -138,11 +138,6 @@ namespace Devices::USB::HID {
         }
 
         collections = nullptr;
-
-        if (last_report != nullptr) {
-            Heap::Free(last_report);
-            last_report = nullptr;
-        }
     }
 
     bool Keyboard::IsUsageSupported(uint32_t page, uint32_t usage) {
@@ -182,39 +177,43 @@ namespace Devices::USB::HID {
     }
 
     size_t Keyboard::GetMaxReportSize() const {
-        size_t max_size = 0;
+        if (max_report_size == 0) {        
+            size_t max_size = 0;
 
-        ReportCollection* currentCollection = collections;
+            ReportCollection* currentCollection = collections;
 
-        while (currentCollection != nullptr) {
-            Report* currentReport = currentCollection->inputReports;
+            while (currentCollection != nullptr) {
+                Report* currentReport = currentCollection->inputReports;
 
-            while (currentReport != nullptr) {
-                size_t report_size = currentReport->GetReportSize();
+                while (currentReport != nullptr) {
+                    size_t report_size = currentReport->GetReportSize();
 
-                if (report_size > max_size) {
-                    max_size = report_size;
+                    if (report_size > max_size) {
+                        max_size = report_size;
+                    }
+
+                    currentReport = currentReport->next;
                 }
 
-                currentReport = currentReport->next;
-            }
+                currentReport = currentCollection->outputReports;
 
-            currentReport = currentCollection->outputReports;
+                while (currentReport != nullptr) {
+                    size_t report_size = currentReport->GetReportSize();
 
-            while (currentReport != nullptr) {
-                size_t report_size = currentReport->GetReportSize();
+                    if (report_size > max_size) {
+                        max_size = report_size;
+                    }
 
-                if (report_size > max_size) {
-                    max_size = report_size;
+                    currentReport = currentReport->next;
                 }
 
-                currentReport = currentReport->next;
+                currentCollection = currentCollection->next;
             }
 
-            currentCollection = currentCollection->next;
+            max_report_size = max_size;
         }
 
-        return max_size;
+        return max_report_size;
     }
 
     Success Keyboard::AddReportItem(const HIDState& state, const IOConfiguration& config, bool input) {
@@ -290,59 +289,43 @@ namespace Devices::USB::HID {
         return Success();
     }
 
-    bool Keyboard::WasInLastReport(uint32_t usage) {
-        // check if usage was part of last report
-        if (last_report != nullptr) {
-            Report* report = collections->GetReport(last_report_id, true);
-
-            if (report != nullptr) {
-                Item* currentItem = report->items;
-
-                while (currentItem != nullptr) {
-                    if (!currentItem->isConstant) {
-                        if (currentItem->size == 1) {
-                            for (size_t j = 0; j < currentItem->count; ++j) {
-                                const size_t bit_index = currentItem->offset + j;
-                                const size_t byte_index = bit_index / 8;
-                                const size_t bit_in_byte = bit_index % 8;
-
-                                const bool pressed = (last_report[byte_index] & (1 << bit_in_byte)) != 0;
-
-                                if ((usage == currentItem->usage_minimum + j) && pressed) {
-                                    return true;
-                                }
-                            }
-                        }
-                        else if (currentItem->size == 8) {
-                            for (size_t j = 0; j < currentItem->count; ++j) {
-                                const size_t byte_index = (currentItem->offset / 8) + j;
-                                const uint8_t value = last_report[byte_index];
-
-                                if (usage == value) {
-                                    return true;
-                                }
-                            }
-                        }
-                    }
-
-                    currentItem = currentItem->next;
-                }
-            }
-        }
-
-        return false;
-    }
-
-    bool Keyboard::RepeatableUsage(uint32_t usage, uint8_t flags) {
-        if (flags & (KeyboardDispatcher::FLAG_LEFT_CONTROL |
-                     KeyboardDispatcher::FLAG_RIGHT_CONTROL |
-                     KeyboardDispatcher::FLAG_LEFT_ALT     |
-                     KeyboardDispatcher::FLAG_RIGHT_ALT    |
-                     KeyboardDispatcher::FLAG_LEFT_GUI     |
-                     KeyboardDispatcher::FLAG_RIGHT_GUI)) {
+    bool Keyboard::KeyStateChanged(uint32_t usage) const {
+        if (usage >= BITMAP_SIZE) {
             return false;
         }
 
+        const size_t entry_index = usage / BITMAP_ENTRY_BITS;
+        const size_t entry_bit = usage % BITMAP_ENTRY_BITS;
+
+        const uint64_t mask = static_cast<uint64_t>(1) << entry_bit;
+
+        const uint64_t current_state = current_keys_bitmap[entry_index] & mask;
+        const uint64_t previous_state = previous_keys_bitmap[entry_index] & mask;
+
+        return current_state != previous_state;
+    }
+
+    void Keyboard::SetKeyPressed(uint32_t usage) {
+        if (usage >= BITMAP_SIZE) {
+            return;
+        }
+
+        const size_t entry_index = usage / BITMAP_ENTRY_BITS;
+        const size_t entry_bit = usage % BITMAP_ENTRY_BITS;
+
+        const uint64_t mask = static_cast<uint64_t>(1) << entry_bit;
+
+        current_keys_bitmap[entry_index] |= mask;
+    }
+
+    void Keyboard::RollBitmapsOver() {
+        for (size_t i = 0; i < BITMAP_ENTRIES; ++i) {
+            previous_keys_bitmap[i] = current_keys_bitmap[i];
+            current_keys_bitmap[i] = 0;
+        }
+    }
+
+    bool Keyboard::RepeatableUsage(uint32_t usage) {
         // if alphanumeric
         static constexpr uint32_t USAGE_A = 0x04;
         static constexpr uint32_t USAGE_0 = 0x27;
@@ -390,7 +373,7 @@ namespace Devices::USB::HID {
         return false;
     }
 
-    uint8_t& Keyboard::TestAndUpdateFlags(uint32_t usage, uint8_t& flags) {
+    uint8_t Keyboard::GetKeyFlags() const {
         static constexpr uint8_t LEFT_CONTROL_USAGE     = 0xE0;
         static constexpr uint8_t LEFT_SHIFT_USAGE       = 0xE1;
         static constexpr uint8_t LEFT_ALT_USAGE         = 0xE2;
@@ -400,39 +383,47 @@ namespace Devices::USB::HID {
         static constexpr uint8_t RIGHT_ALT_USAGE        = 0xE6;
         static constexpr uint8_t RIGHT_GUI_USAGE        = 0xE7;
 
-        switch (usage) {
-            case LEFT_CONTROL_USAGE:
-                flags |= KeyboardDispatcher::FLAG_LEFT_CONTROL;
-                break;
-            case LEFT_SHIFT_USAGE:
-                flags |= KeyboardDispatcher::FLAG_LEFT_SHIFT;
-                break;
-            case LEFT_ALT_USAGE:
-                flags |= KeyboardDispatcher::FLAG_LEFT_ALT;
-                break;
-            case LEFT_GUI_USAGE:
-                flags |= KeyboardDispatcher::FLAG_LEFT_GUI;
-                break;
-            case RIGHT_CONTROL_USAGE:
-                flags |= KeyboardDispatcher::FLAG_RIGHT_CONTROL;
-                break;
-            case RIGHT_SHIFT_USAGE:
-                flags |= KeyboardDispatcher::FLAG_RIGHT_SHIFT;
-                break;
-            case RIGHT_ALT_USAGE:
-                flags |= KeyboardDispatcher::FLAG_RIGHT_ALT;
-                break;
-            case RIGHT_GUI_USAGE:
-                flags |= KeyboardDispatcher::FLAG_RIGHT_GUI;
-                break;
-            default:
-                break;
+        static constexpr size_t FLAGS_COUNT = 8;
+
+        static constexpr uint8_t USAGES[FLAGS_COUNT] = {
+            LEFT_CONTROL_USAGE,
+            LEFT_SHIFT_USAGE,
+            LEFT_ALT_USAGE,
+            LEFT_GUI_USAGE,
+            RIGHT_CONTROL_USAGE,
+            RIGHT_SHIFT_USAGE,
+            RIGHT_ALT_USAGE,
+            RIGHT_GUI_USAGE
         };
+
+        static constexpr uint8_t FLAGS[FLAGS_COUNT] = {
+            KeyboardDispatcher::FLAG_LEFT_CONTROL,
+            KeyboardDispatcher::FLAG_LEFT_SHIFT,
+            KeyboardDispatcher::FLAG_LEFT_ALT,
+            KeyboardDispatcher::FLAG_LEFT_GUI,
+            KeyboardDispatcher::FLAG_RIGHT_CONTROL,
+            KeyboardDispatcher::FLAG_RIGHT_SHIFT,
+            KeyboardDispatcher::FLAG_RIGHT_ALT,
+            KeyboardDispatcher::FLAG_RIGHT_GUI
+        };
+
+        uint8_t flags = 0;
+
+        for (size_t i = 0; i < FLAGS_COUNT; ++i) {
+            const size_t entry_index = USAGES[i] / BITMAP_ENTRY_BITS;
+            const size_t entry_bit = USAGES[i] % BITMAP_ENTRY_BITS;
+
+            const uint64_t mask = static_cast<uint64_t>(1) << entry_bit;
+
+            if (current_keys_bitmap[entry_index] & mask) {
+                flags |= FLAGS[i];
+            }
+        }
 
         return flags;
     }
 
-    uint8_t Keyboard::GetKeypoint(uint32_t usage) {
+    uint8_t Keyboard::GetKeypoint(uint32_t usage) const {
         static constexpr uint8_t KEYPOINT_TABLE[0x100] = {
             KEYPOINT(0,  0),    KEYPOINT(0,  0),     KEYPOINT(0,  0),     KEYPOINT(0,  0),     // No Event, POST Fail, ErrorRollOver, ErrorUndefined
             KEYPOINT(5,  1),    KEYPOINT(6,  6),     KEYPOINT(6,  4),     KEYPOINT(5,  3),     // A, B, C, D
@@ -501,40 +492,93 @@ namespace Devices::USB::HID {
         return VK_INVALID;
     }
 
-    uint8_t Keyboard::HandleKeyUsage(uint32_t usage, uint8_t flags, bool update_flags, bool pressed) {
-        using namespace Devices::KeyboardDispatcher;
-
+    void Keyboard::HandleKeyUsage(uint32_t usage, bool pressed) {
         if (pressed) {
-            if (update_flags) {
-                return TestAndUpdateFlags(usage, flags);
-            }
-            else {
-                const BasicKeyPacket packet = {
-                    .scancode = static_cast<uint8_t>(usage),
-                    .keypoint = GetKeypoint(usage),
-                    .flags = static_cast<uint16_t>(flags | KeyboardDispatcher::FLAG_KEY_PRESSED)
-                };
-
-                if (packet.keypoint != VK_INVALID && !WasInLastReport(usage)) {
-                    Kernel::Exports.keyboardMultiplexerInterface->Write(
-                        0,
-                        sizeof(BasicKeyPacket),
-                        reinterpret_cast<const uint8_t*>(&packet)
-                    );
-                }
-
-                return flags;
-            }
+            SetKeyPressed(usage);
         }
-
-        return flags;
     }
 
-    Optional<uint8_t> Keyboard::UpdateKeys(uint8_t report_id, const uint8_t* data, size_t length, const Optional<uint8_t>& flags) {
-        const bool update_flags = !flags.HasValue();
-        
-        uint8_t internal_flags = update_flags ? 0 : flags.GetValue();
-        
+    void Keyboard::OnKeyPressed(uint32_t usage, uint8_t flags, uint64_t timestamp) {
+        const uint8_t keypoint = GetKeypoint(usage);
+
+        if (keypoint != VK_INVALID) {
+            if (usage < BITMAP_SIZE && RepeatableUsage(usage)) {
+                keys_press_timestamp[usage] = timestamp;
+            }
+
+            KeyboardDispatcher::BasicKeyPacket packet {
+                .scancode = static_cast<uint8_t>(usage),
+                .keypoint = keypoint,
+                .flags    = static_cast<uint16_t>(flags | KeyboardDispatcher::FLAG_KEY_PRESSED),
+            };
+
+            Kernel::Exports.keyboardMultiplexerInterface->Write(
+                0,
+                sizeof(packet),
+                reinterpret_cast<uint8_t*>(&packet)
+            );
+        }
+    }
+
+    void Keyboard::OnKeyReleased(uint32_t usage, uint8_t flags) {
+        const uint8_t keypoint = GetKeypoint(usage);
+
+        if (keypoint != VK_INVALID) {
+            if (usage < BITMAP_SIZE) {
+                keys_press_timestamp[usage] = 0;
+                keys_repeat_timestamp[usage] = 0;
+            }
+
+            KeyboardDispatcher::BasicKeyPacket packet {
+                .scancode = static_cast<uint8_t>(usage),
+                .keypoint = keypoint,
+                .flags    = static_cast<uint16_t>(flags & ~KeyboardDispatcher::FLAG_KEY_PRESSED),
+            };
+
+            Kernel::Exports.keyboardMultiplexerInterface->Write(
+                0,
+                sizeof(packet),
+                reinterpret_cast<uint8_t*>(&packet)
+            );
+        }
+    }
+
+    void Keyboard::OnKeyHeld(uint32_t usage, uint8_t flags, uint64_t timestamp) {
+        if (usage < BITMAP_SIZE) {
+            const uint64_t press_time = keys_press_timestamp[usage];
+            const uint64_t repeat_time = keys_repeat_timestamp[usage];
+
+            if (press_time != 0) {
+                const uint64_t time_since_press = timestamp - press_time;
+
+                if (time_since_press >= KEY_REPEAT_DELAY_MS) {
+                    const uint64_t time_since_repeat = timestamp - repeat_time;
+
+                    if (time_since_repeat >= KEY_REPEAT_RATE_MS) {
+                        keys_repeat_timestamp[usage] = timestamp;
+                        
+                        const uint8_t keypoint = GetKeypoint(usage);
+
+                        if (keypoint != VK_INVALID) {
+                            KeyboardDispatcher::BasicKeyPacket packet {
+                                .scancode = static_cast<uint8_t>(usage),
+                                .keypoint = keypoint,
+                                .flags    = static_cast<uint16_t>(flags | KeyboardDispatcher::FLAG_KEY_PRESSED),
+                            };
+
+                            Kernel::Exports.keyboardMultiplexerInterface->Write(
+                                0,
+                                sizeof(packet),
+                                reinterpret_cast<uint8_t*>(&packet)
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    void Keyboard::UpdateKeys(uint8_t report_id, const uint8_t* data, size_t length) {
         ReportCollection* currentCollection = collections;
 
         while (currentCollection != nullptr) {
@@ -542,7 +586,7 @@ namespace Devices::USB::HID {
 
             if (report != nullptr) {
                 if (report->GetReportSize() > length) {
-                    return Optional<uint8_t>();
+                    return;
                 }
 
                 Item* currentItem = report->items;
@@ -559,11 +603,7 @@ namespace Devices::USB::HID {
 
                                 const uint32_t usage = currentItem->usage_minimum + j;
 
-                                if (repeating_usage == 0 && !update_flags && pressed && RepeatableUsage(usage, repeating_flags)) {
-                                    repeating_usage = usage;
-                                }
-
-                                internal_flags = HandleKeyUsage(usage, internal_flags, update_flags, pressed);
+                                HandleKeyUsage(usage, pressed);
                             }
                         }
                         else if (currentItem->size == 8) {
@@ -571,11 +611,7 @@ namespace Devices::USB::HID {
                                 const size_t byte_index = (currentItem->offset / 8) + j;
                                 const uint8_t value = data[byte_index];
 
-                                if (repeating_usage == 0 && !update_flags && RepeatableUsage(value, repeating_flags)) {
-                                    repeating_usage = value;
-                                }
-                                
-                                internal_flags = HandleKeyUsage(value, internal_flags, update_flags, true);
+                                HandleKeyUsage(value, value != 0);
                             }
                         }
                     }
@@ -585,69 +621,38 @@ namespace Devices::USB::HID {
             }
 
             currentCollection = currentCollection->next;
-        }
+        };
 
-        return Optional<uint8_t>(internal_flags);
+        const uint8_t flags = GetKeyFlags();
+
+        const uint64_t timestamp = Self().GetTimer().GetCountMillis();
+
+        for (size_t i = 0; i < BITMAP_SIZE; ++i) {
+            const size_t entry_index = i / BITMAP_ENTRY_BITS;
+            const size_t entry_bit = i % BITMAP_ENTRY_BITS;
+
+            const uint64_t mask = static_cast<uint64_t>(1) << entry_bit;
+
+            const bool pressed = (current_keys_bitmap[entry_index] & mask) != 0;
+
+            if (KeyStateChanged(i)) {
+                if (pressed) {
+                    OnKeyPressed(i, flags, timestamp);
+                }
+                else {
+                    OnKeyReleased(i, flags);
+                }
+            }
+            else {
+                if (pressed && RepeatableUsage(i)) {
+                    OnKeyHeld(i, flags, timestamp);
+                }
+            }
+        }
     }
 
     void Keyboard::HandleReport(uint8_t report_id, const uint8_t* data, size_t length) {
-        const auto timestamp_ms = Self().GetTimer().GetCountMillis();
-
-        if (report_id != last_report_id
-            || length != last_report_size
-            || last_report == nullptr
-            || (Utils::memcmp(data, last_report, length) != 0)
-            || repeating_usage == 0
-        ) {
-            if (last_report == nullptr) {
-                last_report = static_cast<uint8_t*>(Heap::Allocate(GetMaxReportSize()));
-
-                if (last_report != nullptr) {
-                    last_report_id = report_id;
-                    last_report_size = length;
-                    Utils::memcpy(last_report, data, length);
-                }
-            }
-
-            repeating_usage = 0;
-            repeating_flags = 0;
-
-            const auto flags = UpdateKeys(report_id, data, length, Optional<uint8_t>());
-
-            if (flags.HasValue()) {
-                repeating_flags = flags.GetValue();
-                UpdateKeys(report_id, data, length, flags);
-            }
-
-            last_change_timestamp = timestamp_ms;
-
-            if (last_report != nullptr) {
-                Utils::memcpy(last_report, data, length);
-                last_report_id = report_id;
-                last_report_size = length;
-            }
-        }
-        else {
-            static constexpr uint64_t REPEAT_DELAY_MS       = 500;
-            static constexpr uint64_t REPEAT_INTERVAL_MS    = 50;
-
-            if (timestamp_ms >= last_change_timestamp + REPEAT_DELAY_MS) {
-                if (timestamp_ms >= last_repeat_timestamp + REPEAT_INTERVAL_MS) {
-                    last_repeat_timestamp = timestamp_ms;
-
-                    const KeyboardDispatcher::BasicKeyPacket packet = {
-                        .scancode = static_cast<uint8_t>(repeating_usage),
-                        .keypoint = GetKeypoint(repeating_usage),
-                        .flags = static_cast<uint16_t>(repeating_flags | KeyboardDispatcher::FLAG_KEY_PRESSED)
-                    };
-
-                    Kernel::Exports.keyboardMultiplexerInterface->Write(
-                        0,
-                        sizeof(KeyboardDispatcher::BasicKeyPacket),
-                        reinterpret_cast<const uint8_t*>(&packet)
-                    );
-                }
-            }
-        }
+        UpdateKeys(report_id, data, length);
+        RollBitmapsOver();
     }
 }

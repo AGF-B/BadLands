@@ -1,6 +1,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include <shared/Lock.hpp>
+#include <shared/LockGuard.hpp>
 #include <shared/memory/defs.hpp>
 
 #include <mm/PhysicalMemory.hpp>
@@ -496,7 +498,8 @@ namespace {
 		return true;
 	}
 
-	AVLHeap heap;
+	static Utils::Lock heapLock;
+	static AVLHeap heap;
 }
 
 bool Heap::Create() {
@@ -504,9 +507,11 @@ bool Heap::Create() {
 }
 
 void* Heap::Allocate(size_t size) {
+	Utils::LockGuard _{heapLock};
 	return heap.Allocate(size);
 }
 
 void Heap::Free(void* ptr) {
+	Utils::LockGuard _{heapLock};
 	return heap.Free(ptr);
 }

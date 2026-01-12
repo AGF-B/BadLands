@@ -860,7 +860,6 @@ namespace Devices::USB::xHCI {
     Optional<Device::InterfaceWrapper> Device::ParseInterfaceDescriptor(const uint8_t*& data, const uint8_t* limit) {        
         if (!CheckDescriptor<InterfaceDescriptor>(data).IsSuccess() || data + InterfaceDescriptor::DESCRIPTOR_SIZE > limit) {
             data += GetDescriptorSize(data);
-            __asm__ volatile("jmp .");
             return Optional<InterfaceWrapper>();
         }
 
