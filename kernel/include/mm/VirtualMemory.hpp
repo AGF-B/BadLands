@@ -134,7 +134,7 @@ namespace VirtualMemory {
 	void* DeriveNewFreshCR3();
 
 	void* AllocateDMA(uint64_t pages);
-	void* AllocateKernelHeap(uint64_t pages);
+	void* AllocateKernelHeap(uint64_t pages, bool contiguous = false);
 	void* AllocateUserPages(uint64_t pages);
 	void* AllocateUserPagesAt(uint64_t pages, void* ptr);
 

@@ -229,7 +229,7 @@ namespace VirtualMemory {
 		}
 
         template<AccessPrivilege privilege, bool useHint = false>
-		static inline void* AllocateCore(uint64_t pages, [[maybe_unused]] void* hintPtr) {
+		static inline void* AllocateCore(uint64_t pages, [[maybe_unused]] void* hintPtr, bool contiguous = false) {
 			constexpr uint64_t managementBase = privilege == AccessPrivilege::HIGH
 				? VirtualMemoryLayout::KernelHeapManagement.start
 				: (VirtualMemoryLayout::UserVMemManagement.start
@@ -364,7 +364,28 @@ namespace VirtualMemory {
 			);
 			const bool remove = vmmb->availablePages == 0;
 
-			if (MapOnDemand(pagesStart, pages, privilege) != StatusCode::SUCCESS) {
+			if (contiguous) {
+				void* physical_pages = PhysicalMemory::AllocatePages(pages);
+
+				if (physical_pages == nullptr) {
+					vmmb->availablePages += pages;
+					return nullptr;
+				}
+
+				for (size_t i = 0; i < pages; ++i) {
+					const uint64_t physicalAddress = PhysicalMemory::FilterAddress(
+						reinterpret_cast<uint8_t*>(physical_pages) + i * ShdMem::FRAME_SIZE
+					);
+					const uint64_t virtualAddress = reinterpret_cast<uint64_t>(pagesStart) + i * ShdMem::FRAME_SIZE;
+
+					if (MapPage<true>(physicalAddress, virtualAddress, privilege) != StatusCode::SUCCESS) {
+						PhysicalMemory::FreePages(physical_pages, pages);
+						vmmb->availablePages += pages;
+						return nullptr;
+					}
+				}
+			}
+			else if (MapOnDemand(pagesStart, pages, privilege) != StatusCode::SUCCESS) {
 				vmmb->availablePages += pages;
 				return nullptr;
 			}
@@ -806,7 +827,7 @@ namespace VirtualMemory {
 		return allocated;
 	}
 
-	void* AllocateKernelHeap(uint64_t pages) {
+	void* AllocateKernelHeap(uint64_t pages, bool contiguous) {
 		return AllocateCore<AccessPrivilege::HIGH>(pages, nullptr);
 	}
 
