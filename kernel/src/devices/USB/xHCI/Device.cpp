@@ -209,7 +209,7 @@ namespace Devices::USB::xHCI {
 
     void Device::ConfigurationDescriptor::Release() {
         if (valid) {
-            for (size_t i = 0; i < interfacesNumber; ++i) {
+            for (size_t i = 0; i < functionsNumber; ++i) {
                 functions[i].Release();
             }
             Heap::Free(functions);
@@ -753,6 +753,7 @@ namespace Devices::USB::xHCI {
 
             if (GetDescriptorType(ptr) == INTERFACE_ASSOCIATION_TYPE) {
                 const auto descriptor_size = GetDescriptorSize(ptr);
+
                 if (descriptor_size >= INTERFACE_ASSOCIATION_SIZE && ptr + descriptor_size <= limit) {
                     FunctionDescriptor new_function = {
                         .functionClass = ptr[4],
@@ -774,6 +775,13 @@ namespace Devices::USB::xHCI {
 
                 ptr += descriptor_size;
                 continue;
+            }
+
+            if (GetDescriptorSize(ptr) == 0) {
+                Log::putsSafe("[USB] Invalid descriptor with zero length, aborting configuration parsing\r\n");
+                config_descriptor.Release();
+                Heap::Free(data);
+                return Optional<ConfigurationDescriptor>();
             }
 
             auto interface_wrapper = ParseInterfaceDescriptor(ptr, limit);
@@ -804,7 +812,16 @@ namespace Devices::USB::xHCI {
                         Log::printfSafe("[USB] Failed to create function for interface %u\n\r", interface.descriptor.interfaceNumber);
 
                         while (ptr < limit && GetDescriptorType(ptr) != InterfaceDescriptor::DESCRIPTOR_TYPE) {
-                            ptr += GetDescriptorSize(ptr);
+                            const size_t desc_size = GetDescriptorSize(ptr);
+
+                            if (desc_size == 0) {
+                                Log::putsSafe("[USB] Invalid descriptor with zero length, aborting interface parsing\r\n");
+                                config_descriptor.Release();
+                                Heap::Free(data);
+                                return Optional<ConfigurationDescriptor>();
+                            }
+
+                            ptr += desc_size;
                         }
 
                         continue;
@@ -899,6 +916,15 @@ namespace Devices::USB::xHCI {
 
             for (size_t descriptor_index = 0; descriptor_index < interface_descriptor.endpointsNumber && data < limit; ++descriptor_index) {
                 while (GetDescriptorType(data) != EndpointDescriptor::DESCRIPTOR_TYPE && data < limit) {
+                    // Check for invalid descriptor length to prevent infinite loops
+                    const size_t desc_size = GetDescriptorSize(data);
+                    
+                    if (desc_size == 0) {
+                        Log::printfSafe("[USB] Invalid descriptor with zero length, aborting interface parsing\r\n");
+                        interface_descriptor.Release();
+                        return Optional<InterfaceWrapper>();
+                    }
+
                     auto extra_wrapper = ParseDeviceSpecificDescriptor(data, limit);
 
                     if (extra_wrapper.HasValue()) {
