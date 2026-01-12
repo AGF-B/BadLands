@@ -363,8 +363,7 @@ namespace Devices::USB::xHCI {
     }
 
     void Controller::SignalCommand() const {
-        __asm__ volatile("mfence" ::: "memory");
-        __asm__ volatile("lfence" ::: "memory");
+        asm volatile("mfence" ::: "memory");
         doorbell_regs->r[0] = 0;
     }
 
@@ -673,7 +672,16 @@ namespace Devices::USB::xHCI {
 
                         Log::printfSafe("[xHCI] Port 0x%0.2hhx mapped to slot %hhu\n\r", i, ports[i].slot);
 
-                        auto generic_device = Device(*this, DeviceInformation{
+                        auto* const raw_device = Heap::Allocate(sizeof(Device));
+
+                        if (raw_device == nullptr) {
+                            Log::printfSafe("[xHCI] Could not allocate memory for device on port 0x%0.2hhx\n\r", i);
+                            DisableSlot(ports[i].slot);
+                            ports[i].slot = 0;
+                            continue;
+                        }
+
+                        auto generic_device = new (raw_device) Device(*this, DeviceInformation{
                             .route_string = 0,
                             .parent_port = static_cast<uint8_t>(i + 1),
                             .root_hub_port = static_cast<uint8_t>(i + 1),
@@ -682,9 +690,11 @@ namespace Devices::USB::xHCI {
                             .depth = 0
                         });
 
-                        devices[slot_id - 1] = &generic_device;
+                        devices[slot_id - 1] = generic_device;
 
-                        auto device = generic_device.Initialize();
+                        auto device = generic_device->Initialize();
+
+                        Heap::Free(raw_device);
 
                         if (!device.HasValue()) {
                             Log::printfSafe("[xHCI] Failed to initialize device on port 0x%0.2hhx\n\r", i);
@@ -1065,8 +1075,7 @@ namespace Devices::USB::xHCI {
             return Failure();
         }
 
-        __asm__ volatile("mfence" ::: "memory");
-        __asm__ volatile("lfence" ::: "memory");
+        asm volatile("mfence" ::: "memory");
         doorbell_regs->r[device.GetInformation().slot_id] = reason;
 
         return Success();
