@@ -13,6 +13,7 @@
 #include <devices/USB/xHCI/TRB.hpp>
 
 #include <mm/Heap.hpp>
+#include <mm/IOHeap.hpp>
 #include <mm/VirtualMemory.hpp>
 
 #include <screen/Log.hpp>
@@ -128,6 +129,7 @@ namespace Devices::USB::HID {
 
     void Device::SoftRelease() {
         hierarchy.Release();
+        IOHeap::Free(reportBuffer);
     }
 
     Optional<Device::HIDDescriptor> Device::GetHIDDescriptor(InterfaceDescriptor* interface) {
@@ -517,7 +519,7 @@ namespace Devices::USB::HID {
 
         auto hid_descriptor = hid_descriptor_wrapper.GetValue();
 
-        uint8_t* buffer = reinterpret_cast<uint8_t*>(Heap::Allocate(hid_descriptor.reportDescriptorLength));
+        uint8_t* buffer = reinterpret_cast<uint8_t*>(IOHeap::Allocate(hid_descriptor.reportDescriptorLength));
 
         if (buffer == nullptr) {
             Log::printfSafe("[HID] Could not allocate memory for report descriptor (size: %u bytes)\n\r", hid_descriptor.reportDescriptorLength);
@@ -537,7 +539,7 @@ namespace Devices::USB::HID {
             buffer
         ).IsSuccess()) {
             Log::printfSafe("[HID] Failed to fetch report descriptor from device\n\r");
-            Heap::Free(buffer);
+            IOHeap::Free(buffer);
             return Optional<Device*>();
         }
 
@@ -549,13 +551,13 @@ namespace Devices::USB::HID {
 
         if (!hierarchy_wrapper.HasValue()) {
             Log::printfSafe("[HID] Failed to parse report descriptor\n\r");
-            Heap::Free(buffer);
+            IOHeap::Free(buffer);
             return Optional<Device*>();
         }
 
         Log::printfSafe("[HID] Successfully parsed report descriptor\n\r");
 
-        Heap::Free(buffer);
+        IOHeap::Free(buffer);
 
         auto hierarchy = hierarchy_wrapper.GetValue();
 
@@ -584,7 +586,7 @@ namespace Devices::USB::HID {
         }
 
         /// Initialize IN endpoint by sending normal TRB with a buffer large enough to hold any report
-        uint8_t* reportBuffer = reinterpret_cast<uint8_t*>(Heap::Allocate(hierarchy.GetMaxReportSize()));
+        uint8_t* reportBuffer = reinterpret_cast<uint8_t*>(IOHeap::Allocate(hierarchy.GetMaxReportSize()));
 
         if (reportBuffer == nullptr) {
             Log::printfSafe("[HID] Could not allocate memory for report buffer\n\r");
