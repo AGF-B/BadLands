@@ -13,6 +13,7 @@
 #include <devices/USB/xHCI/Specification.hpp>
 
 #include <mm/Heap.hpp>
+#include <mm/IOHeap.hpp>
 #include <mm/Utils.hpp>
 #include <mm/VirtualMemory.hpp>
 
@@ -376,14 +377,14 @@ namespace Devices::USB::xHCI {
 
         const size_t descriptor_size = static_cast<size_t>(header.length);
 
-        uint8_t* descriptor_data = reinterpret_cast<uint8_t*>(Heap::Allocate(descriptor_size));
+        uint8_t* descriptor_data = reinterpret_cast<uint8_t*>(IOHeap::Allocate(descriptor_size));
 
         if (descriptor_data == nullptr) {
             return Optional<uint8_t*>();
         }
 
         if (!GetDescriptor(type, index, static_cast<uint16_t>(descriptor_size), descriptor_data, languageID).IsSuccess()) {
-            Heap::Free(descriptor_data);
+            IOHeap::Free(descriptor_data);
             return Optional<uint8_t*>();
         }
 
@@ -420,7 +421,7 @@ namespace Devices::USB::xHCI {
 
         if (GetDescriptorSize(descriptor_data) < StringDescriptor::MIN_DESCRIPTOR_SIZE ||
             GetDescriptorType(descriptor_data) != StringDescriptor::DESCRIPTOR_TYPE) {
-            Heap::Free(descriptor_data);
+            IOHeap::Free(descriptor_data);
             return Optional<char*>();
         }
 
@@ -430,7 +431,7 @@ namespace Devices::USB::xHCI {
         char* const result_string = reinterpret_cast<char*>(Heap::Allocate(string_length + 1));
 
         if (result_string == nullptr) {
-            Heap::Free(descriptor_data);
+            IOHeap::Free(descriptor_data);
             return Optional<char*>();
         }
 
@@ -441,7 +442,7 @@ namespace Devices::USB::xHCI {
 
         result_string[string_length] = '\0';
 
-        Heap::Free(descriptor_data);
+        IOHeap::Free(descriptor_data);
         return Optional<char*>(result_string);
     }
 
@@ -707,14 +708,14 @@ namespace Devices::USB::xHCI {
 
         const size_t descriptor_size = static_cast<size_t>(pre_data[1]);
 
-        uint8_t* const data = reinterpret_cast<uint8_t*>(Heap::Allocate(descriptor_size));
+        uint8_t* const data = reinterpret_cast<uint8_t*>(IOHeap::Allocate(descriptor_size));
 
         if (data == nullptr) {
             return Optional<ConfigurationDescriptor>();
         }
 
         if (!GetDescriptor(ConfigurationDescriptor::DESCRIPTOR_TYPE, index, descriptor_size, data).IsSuccess()) {
-            Heap::Free(data);
+            IOHeap::Free(data);
             return Optional<ConfigurationDescriptor>();
         }
         
@@ -780,7 +781,7 @@ namespace Devices::USB::xHCI {
             if (GetDescriptorSize(ptr) == 0) {
                 Log::putsSafe("[USB] Invalid descriptor with zero length, aborting configuration parsing\r\n");
                 config_descriptor.Release();
-                Heap::Free(data);
+                IOHeap::Free(data);
                 return Optional<ConfigurationDescriptor>();
             }
 
@@ -817,7 +818,7 @@ namespace Devices::USB::xHCI {
                             if (desc_size == 0) {
                                 Log::putsSafe("[USB] Invalid descriptor with zero length, aborting interface parsing\r\n");
                                 config_descriptor.Release();
-                                Heap::Free(data);
+                                IOHeap::Free(data);
                                 return Optional<ConfigurationDescriptor>();
                             }
 
@@ -864,7 +865,7 @@ namespace Devices::USB::xHCI {
             }
         }
 
-        Heap::Free(data);
+        IOHeap::Free(data);
 
         if (!found_valid_interface) {
             config_descriptor.Release();
@@ -1178,7 +1179,9 @@ namespace Devices::USB::xHCI {
         const uint8_t length = data[0];
         const uint8_t descriptorType = data[1];
 
-        DeviceSpecificDescriptor* descriptor = reinterpret_cast<DeviceSpecificDescriptor*>(Heap::Allocate(length - 2 + sizeof(DeviceSpecificDescriptor)));
+        DeviceSpecificDescriptor* descriptor = reinterpret_cast<DeviceSpecificDescriptor*>(
+            Heap::Allocate(length - 2 + sizeof(DeviceSpecificDescriptor))
+        );
 
         if (descriptor == nullptr) {
             data += length;
