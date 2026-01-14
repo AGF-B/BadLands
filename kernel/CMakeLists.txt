@@ -5,7 +5,7 @@ project(KERNEL_IMG)
 set(CMAKE_ASM_NASM_OBJECT_FORMAT win64)
 enable_language(ASM_NASM)
 
-add_library(KERNEL_IMG_ASM STATIC
+add_library(KERNEL_IMG_ASM OBJECT
     "../common/src/shared/AtomicImpl.asm"
     "src/interrupts/IDTCore.asm"
     "src/interrupts/PIC.asm"
@@ -13,15 +13,15 @@ add_library(KERNEL_IMG_ASM STATIC
     "src/mm/gdt.asm"
 )
 
-add_library(KERNEL_IMG_C STATIC
+add_library(KERNEL_IMG_C OBJECT
     "src/devices/KeyboardDispatcher/KeycodeMap.c"
 )
 
-add_library(KERNEL_SVC STATIC
+add_library(KERNEL_SVC OBJECT
     "src/services/shell/entry.cpp"
 )
 
-add_library(xHCI_USB STATIC
+add_library(xHCI_USB OBJECT
     "src/devices/USB/HID/Device.cpp"
     "src/devices/USB/HID/Keyboard.cpp"
     "src/devices/USB/xHCI/Controller.cpp"
@@ -49,6 +49,7 @@ add_executable(KERNEL_IMG
     "src/interrupts/PIT.cpp"
     "src/interrupts/RuntimeSvc.cpp"
     "src/mm/Heap.cpp"
+    "src/mm/IOHeap.cpp"
     "src/mm/PhysicalMemory.cpp"
     "src/mm/Utils.cpp"
     "src/mm/VirtualMemory.cpp"
@@ -64,6 +65,13 @@ add_executable(KERNEL_IMG
     "src/screen/Log.cpp"
     "src/screen/ThreadSafe.cpp"
     "src/entry.cpp"
+)
+
+add_library(KERNEL_EXTENSIONS STATIC
+    $<TARGET_OBJECTS:KERNEL_IMG_ASM>
+    $<TARGET_OBJECTS:KERNEL_IMG_C>
+    $<TARGET_OBJECTS:KERNEL_SVC>
+    $<TARGET_OBJECTS:xHCI_USB>
 )
 
 set_target_properties(KERNEL_IMG PROPERTIES OUTPUT_NAME "kernel.img")
@@ -96,6 +104,7 @@ target_compile_options(KERNEL_IMG PRIVATE
     -flto
     -fno-stack-protector
 )
+
 target_compile_options(KERNEL_IMG_C PRIVATE
     -mabi=ms
     -Wall
@@ -162,31 +171,16 @@ target_link_options(KERNEL_IMG PRIVATE
     -nolibc
     -nostdlib
     -flto
-    -s
+    #-s
 )
-target_link_options(KERNEL_IMG_C PRIVATE
+
+target_link_options(KERNEL_EXTENSIONS PRIVATE
     -Wl,--build-id=none
     -z noexecstack
     -nolibc
     -nostdlib
     -flto
-    -s
-)
-target_link_options(KERNEL_SVC PRIVATE
-    -Wl,--build-id=none
-    -z noexecstack
-    -nolibc
-    -nostdlib
-    -flto
-    -s
-)
-target_link_options(xHCI_USB PRIVATE
-    -Wl,--build-id=none
-    -z noexecstack
-    -nolibc
-    -nostdlib
-    -flto
-    -s
+    #-s
 )
 
 target_compile_features(KERNEL_IMG PRIVATE cxx_std_23)
@@ -194,9 +188,6 @@ target_compile_features(KERNEL_SVC PRIVATE cxx_std_23)
 target_compile_features(xHCI_USB PRIVATE cxx_std_23)
 
 target_link_libraries(KERNEL_IMG PRIVATE
-    KERNEL_IMG_ASM
-    KERNEL_IMG_C
-    KERNEL_SVC
-    xHCI_USB
+    KERNEL_EXTENSIONS
     -static
 )
