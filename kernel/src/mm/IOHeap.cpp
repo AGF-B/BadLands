@@ -33,6 +33,16 @@ namespace IOHeap {
                 return Failure();
             }
 
+            if (VirtualMemory::ChangeMappingFlags(
+                head,
+                ShdMem::PTE_UNCACHEABLE | ShdMem::PTE_READWRITE | ShdMem::PTE_PRESENT,
+                DEFAULT_PAGES
+            ) != VirtualMemory::StatusCode::SUCCESS) {
+                VirtualMemory::FreeKernelHeap(head, DEFAULT_PAGES);
+                head = nullptr;
+                return Failure();
+            }
+
             head->padding = 0;
             head->size = DEFAULT_ARENA_SIZE - sizeof(Metadata);
             head->next = nullptr;
@@ -135,26 +145,32 @@ namespace IOHeap {
                 reinterpret_cast<uint8_t*>(user_metadata) - user_metadata->padding
             );
 
-            for (Metadata* current = head; current != nullptr; current = current->next) {
-                const uintptr_t current_address = reinterpret_cast<uintptr_t>(current);
-                const uintptr_t current_end = current_address + sizeof(Metadata) + current->size;
-                const uintptr_t metadata_address = reinterpret_cast<uintptr_t>(metadata);
+            if (head == nullptr) {
+                head = metadata;
+                metadata->next = nullptr;
+            }
+            else {
+                for (Metadata* current = head; current != nullptr; current = current->next) {
+                    const uintptr_t current_address = reinterpret_cast<uintptr_t>(current);
+                    const uintptr_t current_end = current_address + sizeof(Metadata) + current->size;
+                    const uintptr_t metadata_address = reinterpret_cast<uintptr_t>(metadata);
 
-                Metadata* next = current->next;
+                    Metadata* next = current->next;
 
-                if (next == nullptr) {
-                    current->next = metadata;
-                }
-                else {
-                    const uintptr_t next_address = reinterpret_cast<uintptr_t>(next);
-
-                    if (metadata_address >= current_end && metadata_address < next_address) {
-                        metadata->next = next;
+                    if (next == nullptr) {
                         current->next = metadata;
                     }
-                }
+                    else {
+                        const uintptr_t next_address = reinterpret_cast<uintptr_t>(next);
 
-                Coalesce(current);
+                        if (metadata_address >= current_end && metadata_address < next_address) {
+                            metadata->next = next;
+                            current->next = metadata;
+                        }
+                    }
+
+                    Coalesce(current);
+                }
             }
         }
     }

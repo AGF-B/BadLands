@@ -24,6 +24,7 @@
 
 #include <mm/gdt.hpp>
 #include <mm/Heap.hpp>
+#include <mm/IOHeap.hpp>
 #include <mm/PhysicalMemory.hpp>
 #include <mm/VirtualMemory.hpp>
 
@@ -73,6 +74,12 @@ namespace {
     static inline void SetupVirtualMemory() {
         if (VirtualMemory::Setup() != VirtualMemory::StatusCode::SUCCESS) {
             Panic::PanicShutdown("VMM INITIALIZATION FAILED\n\r");
+        }
+    }
+
+    static inline void SetupIOHeap() {
+        if (!IOHeap::Create().IsSuccess()) {
+            Panic::PanicShutdown("IO HEAP CREATION FAILED: COULD NOT FIND ENOUGH CONTIGUOUS PHYSICAL MEMORY\n\r");
         }
     }
 
@@ -165,6 +172,9 @@ LEGACY_EXPORT void KernelEntry() {
 
     SetupVirtualMemory();
     Log::puts("VMM Initialized\n\r");
+
+    SetupIOHeap();
+    Log::puts("IO HEAP Initialized\n\r");
 
     SetupHeap();
     Log::puts("KERNEL HEAP Initialized\n\r");

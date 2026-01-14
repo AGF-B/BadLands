@@ -369,7 +369,9 @@ namespace Devices::USB::xHCI {
     }
 
     Optional<uint8_t*> Device::GetDescriptor(uint8_t type, uint8_t index, uint8_t languageID) {
-        RawDescriptorHeader header;
+        // alignas to prevent page boundary crossing issues
+        static_assert(sizeof(RawDescriptorHeader) < 0x8);
+        alignas(0x8) RawDescriptorHeader header;
         
         if (!GetDescriptor(type, index, sizeof(RawDescriptorHeader), reinterpret_cast<uint8_t*>(&header), languageID).IsSuccess()) {
             return Optional<uint8_t*>();
@@ -608,7 +610,9 @@ namespace Devices::USB::xHCI {
     }
 
     Success Device::FetchDeviceDescriptor() {
-        uint8_t usb_descriptor[DeviceDescriptor::DESCRIPTOR_SIZE] = { 0 };
+        // prevent page boundary crossing issues
+        static_assert(DeviceDescriptor::DESCRIPTOR_SIZE <= 0x20);
+        alignas(0x20) uint8_t usb_descriptor[DeviceDescriptor::DESCRIPTOR_SIZE] = { 0 };
 
         if (!GetDescriptor(DeviceDescriptor::DESCRIPTOR_TYPE, 0, DeviceDescriptor::DESCRIPTOR_SIZE, usb_descriptor).IsSuccess()) {
             return Failure();
