@@ -828,7 +828,7 @@ namespace VirtualMemory {
 	}
 
 	void* AllocateKernelHeap(uint64_t pages, bool contiguous) {
-		return AllocateCore<AccessPrivilege::HIGH>(pages, nullptr);
+		return AllocateCore<AccessPrivilege::HIGH>(pages, nullptr, contiguous);
 	}
 
 	void* AllocateUserPages(uint64_t pages) {
