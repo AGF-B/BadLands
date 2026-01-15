@@ -13,7 +13,7 @@ namespace ShdMem = Shared::Memory;
 
 namespace IOHeap {
     static constexpr size_t DEFAULT_ARENA_SIZE = 16 * 1024 * 1024; // 16 MB
-    static constexpr size_t DEFAULT_PAGES = DEFAULT_ARENA_SIZE / ShdMem::PAGE_SIZE;
+    static constexpr size_t DEFAULT_PAGES = (DEFAULT_ARENA_SIZE + ShdMem::PAGE_SIZE - 1) / ShdMem::PAGE_SIZE;
     
     struct Metadata {
         uint32_t padding;
@@ -150,6 +150,14 @@ namespace IOHeap {
                 metadata->next = nullptr;
             }
             else {
+                bool inserted = false;
+
+                if (metadata < head) {
+                    metadata->next = head;
+                    head = metadata;
+                    inserted = true;
+                }
+
                 for (Metadata* current = head; current != nullptr; current = current->next) {
                     const uintptr_t current_address = reinterpret_cast<uintptr_t>(current);
                     const uintptr_t current_end = current_address + sizeof(Metadata) + current->size;
@@ -157,15 +165,19 @@ namespace IOHeap {
 
                     Metadata* next = current->next;
 
-                    if (next == nullptr) {
-                        current->next = metadata;
-                    }
-                    else {
-                        const uintptr_t next_address = reinterpret_cast<uintptr_t>(next);
-
-                        if (metadata_address >= current_end && metadata_address < next_address) {
-                            metadata->next = next;
+                    if (!inserted) {
+                        if (next == nullptr) {
                             current->next = metadata;
+                            inserted = true;
+                        }
+                        else {
+                            const uintptr_t next_address = reinterpret_cast<uintptr_t>(next);
+
+                            if (metadata_address >= current_end && metadata_address < next_address) {
+                                metadata->next = next;
+                                current->next = metadata;
+                                inserted = true;
+                            }
                         }
                     }
 
