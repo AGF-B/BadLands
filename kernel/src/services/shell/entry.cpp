@@ -76,7 +76,7 @@ namespace Services {
                             bool shift = (vpkt.flags & Devices::KeyboardDispatcher::FLAG_LEFT_SHIFT) ||
                                          (vpkt.flags & Devices::KeyboardDispatcher::FLAG_RIGHT_SHIFT);
 
-                            char shift_offset = shift ? 'a' - 'A' : 0;
+                            char shift_offset = shift ? 'A' - 'a' : 0;
 
                             switch (vpkt.keycode) {
                                 case VK_A: c = 'a' + shift_offset; break;
