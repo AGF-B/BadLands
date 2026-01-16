@@ -14,7 +14,7 @@ namespace ShdMem = Shared::Memory;
 namespace IOHeap {
     static constexpr size_t PAGES_IN_HUGE_PAGE = ShdMem::PDE_COVERAGE / ShdMem::PAGE_SIZE;
 
-    static constexpr size_t DEFAULT_ARENA_SIZE = 32 * 1024 * 1024; // 16 MB
+    static constexpr size_t DEFAULT_ARENA_SIZE = 32 * 1024 * 1024; // 32 MB
     static constexpr size_t DEFAULT_PAGES = (DEFAULT_ARENA_SIZE + ShdMem::PAGE_SIZE - 1) / ShdMem::PAGE_SIZE;
     static constexpr size_t DEFAULT_HUGE_PAGES = (DEFAULT_PAGES) / PAGES_IN_HUGE_PAGE;
 
