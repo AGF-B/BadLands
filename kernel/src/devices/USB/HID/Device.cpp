@@ -14,7 +14,7 @@
 
 #include <mm/Heap.hpp>
 #include <mm/IOHeap.hpp>
-#include <mm/VirtualMemory.hpp>
+#include <mm/Paging.hpp>
 
 #include <screen/Log.hpp>
 
@@ -107,8 +107,14 @@ namespace Devices::USB::HID {
     }
 
     void Device::InitiateTransaction() {
+        const auto buffer_pointer_wrapper = Paging::GetPhysicalAddress(reportBuffer);
+
+        if (!buffer_pointer_wrapper.HasValue()) {
+            return;
+        }
+
         const auto init_trb = xHCI::NormalTRB::Create({
-            .bufferPointer = VirtualMemory::GetPhysicalAddress(reportBuffer),
+            .bufferPointer = buffer_pointer_wrapper.GetValue(),
             .transferLength = static_cast<uint32_t>(hierarchy.GetMaxReportSize()),
             .tdSize = 0,
             .interrupterTarget = 0,
@@ -640,7 +646,9 @@ namespace Devices::USB::HID {
     }
 
     void Device::SignalTransferComplete(const xHCI::TransferEventTRB& trb) {
-        if (trb.GetPointer() == VirtualMemory::GetPhysicalAddress(last_sent_trb)) {
+        const auto physical_address_wrapper = Paging::GetPhysicalAddress(last_sent_trb);
+
+        if (physical_address_wrapper.HasValue() && trb.GetPointer() == physical_address_wrapper.GetValue()) {
             HandleTransactionComplete();
             InitiateTransaction();
         }

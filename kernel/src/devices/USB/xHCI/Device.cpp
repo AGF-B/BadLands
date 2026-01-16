@@ -14,8 +14,8 @@
 
 #include <mm/Heap.hpp>
 #include <mm/IOHeap.hpp>
+#include <mm/Paging.hpp>
 #include <mm/Utils.hpp>
-#include <mm/VirtualMemory.hpp>
 
 #include <sched/Self.hpp>
 
@@ -332,8 +332,14 @@ namespace Devices::USB::xHCI {
         device.control_transfer_ring->Enqueue(setup);
 
         if (buffer != nullptr) {
+            const auto buffer_pointer_wrapper = Paging::GetPhysicalAddress(buffer);
+
+            if (!buffer_pointer_wrapper.HasValue()) {
+                return Failure();
+            }
+
             DataTRB data = DataTRB::Create({
-                .bufferPointer = VirtualMemory::GetPhysicalAddress(buffer),
+                .bufferPointer = buffer_pointer_wrapper.GetValue(),
                 .transferLength = wLength,
                 .tdSize = 0,
                 .interrupterTarget = 0,
@@ -1403,7 +1409,9 @@ namespace Devices::USB::xHCI {
     }
 
     void Device::SignalTransferComplete(const TransferEventTRB& trb) {
-        if (trb.GetPointer() == VirtualMemory::GetPhysicalAddress(awaiting_transfer)) {
+        const auto awaiting_transfer_address_wrapper = Paging::GetPhysicalAddress(awaiting_transfer);
+
+        if (awaiting_transfer_address_wrapper.HasValue() && trb.GetPointer() == awaiting_transfer_address_wrapper.GetValue()) {
             transfer_result = trb;
             transfer_complete.store(true);
         }

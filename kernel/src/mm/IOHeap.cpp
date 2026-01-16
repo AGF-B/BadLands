@@ -12,8 +12,13 @@
 namespace ShdMem = Shared::Memory;
 
 namespace IOHeap {
-    static constexpr size_t DEFAULT_ARENA_SIZE = 16 * 1024 * 1024; // 16 MB
+    static constexpr size_t PAGES_IN_HUGE_PAGE = ShdMem::PDE_COVERAGE / ShdMem::PAGE_SIZE;
+
+    static constexpr size_t DEFAULT_ARENA_SIZE = 32 * 1024 * 1024; // 16 MB
     static constexpr size_t DEFAULT_PAGES = (DEFAULT_ARENA_SIZE + ShdMem::PAGE_SIZE - 1) / ShdMem::PAGE_SIZE;
+    static constexpr size_t DEFAULT_HUGE_PAGES = (DEFAULT_PAGES) / PAGES_IN_HUGE_PAGE;
+
+    static_assert(DEFAULT_PAGES % PAGES_IN_HUGE_PAGE == 0);
     
     struct Metadata {
         uint32_t padding;
@@ -27,7 +32,7 @@ namespace IOHeap {
 
     Success Create() {
         if (head == nullptr) {
-            head = static_cast<Metadata*>(VirtualMemory::AllocateKernelHeap(DEFAULT_PAGES, true));
+            head = static_cast<Metadata*>(VirtualMemory::AllocateKernelHeap(DEFAULT_PAGES, true, true));
 
             if (head == nullptr) {
                 return Failure();
@@ -35,8 +40,9 @@ namespace IOHeap {
 
             if (VirtualMemory::ChangeMappingFlags(
                 head,
-                ShdMem::PTE_UNCACHEABLE | ShdMem::PTE_READWRITE | ShdMem::PTE_PRESENT,
-                DEFAULT_PAGES
+                ShdMem::PDE_PAGE_SIZE | ShdMem::PDE_UNCACHEABLE | ShdMem::PDE_READWRITE | ShdMem::PDE_PRESENT,
+                DEFAULT_HUGE_PAGES,
+                true
             ) != VirtualMemory::StatusCode::SUCCESS) {
                 VirtualMemory::FreeKernelHeap(head, DEFAULT_PAGES);
                 head = nullptr;

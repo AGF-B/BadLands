@@ -5,6 +5,7 @@
 #include <shared/memory/defs.hpp>
 #include <shared/memory/layout.hpp>
 
+#include <mm/Paging.hpp>
 #include <mm/PhysicalMemory.hpp>
 #include <mm/VirtualMemory.hpp>
 #include <mm/VirtualMemoryLayout.hpp>
@@ -90,17 +91,21 @@ PhysicalMemory::StatusCode PhysicalMemory::Setup() {
 			else if (availableBlockMemory == 0) {
 				uint64_t pageAddress = descriptor->PhysicalStart + ShdMem::FRAME_SIZE * (--descriptor->NumberOfPages);
 
-				ShdMem::VirtualAddress mapping = ShdMem::ParseVirtualAddress(currentBlockPtr);
+				const auto mapping = ShdMem::ParseVirtualAddress(currentBlockPtr);
 
-				ShdMem::PML4E* pml4e = VirtualMemory::GetPML4EAddress(mapping.PML4_offset);
+				const auto pml4e = Paging::GetPML4EAddress(mapping);
+				const auto pml4e_info = Paging::GetPML4EInfo(pml4e);
 
-				if ((*pml4e & ShdMem::PML4E_PRESENT) == 0) {
+				if (!pml4e_info.present) {
 					// use the last page and try again
-					*pml4e = (FilterAddress(pageAddress) & ShdMem::PML4E_ADDRESS)
-						| ShdMem::PML4E_READWRITE
-						| ShdMem::PML4E_PRESENT;
+					Paging::SetPML4EInfo(pml4e, {
+						.present = 1,
+						.readWrite = 1,
+						.address = FilterAddress(pageAddress)
+					});
 
-					ShdMem::PDPTE* pdpt = VirtualMemory::GetPDPTAddress(mapping.PML4_offset);
+					const auto pdpt = Paging::GetPDPTAddress(mapping);
+					Paging::InvalidatePage(pdpt);
 					ShdMem::ZeroPage(pdpt);
 
 					if (descriptor->NumberOfPages == 0) {
@@ -109,14 +114,18 @@ PhysicalMemory::StatusCode PhysicalMemory::Setup() {
 					pageAddress = descriptor->PhysicalStart + ShdMem::FRAME_SIZE * (--descriptor->NumberOfPages);
 				}
 
-				ShdMem::PDPTE* pdpte = VirtualMemory::GetPDPTEAddress(mapping.PML4_offset, mapping.PDPT_offset);
+				const auto pdpte = Paging::GetPDPTEAddress(mapping);
+				const auto pdpte_info = Paging::GetPDPTEInfo(pdpte);
 
-				if ((*pdpte & ShdMem::PDPTE_PRESENT) == 0) {
-					*pdpte = (FilterAddress(pageAddress) & ShdMem::PDPTE_ADDRESS)
-						| ShdMem::PDPTE_READWRITE
-						| ShdMem::PDPTE_PRESENT;
+				if (!pdpte_info.present) {
+					Paging::SetPDPTEInfo(pdpte, {
+						.present = 1,
+						.readWrite = 1,
+						.address = FilterAddress(pageAddress)
+					});
 
-					ShdMem::PDE* pd = VirtualMemory::GetPDAddress(mapping.PML4_offset, mapping.PDPT_offset);
+					const auto pd = Paging::GetPDAddress(mapping);
+					Paging::InvalidatePage(pd);
 					ShdMem::ZeroPage(pd);
 
 					if (descriptor->NumberOfPages == 0) {
@@ -125,14 +134,18 @@ PhysicalMemory::StatusCode PhysicalMemory::Setup() {
 					pageAddress = descriptor->PhysicalStart + ShdMem::FRAME_SIZE * (--descriptor->NumberOfPages);
 				}
 
-				ShdMem::PDE* pde = VirtualMemory::GetPDEAddress(mapping.PML4_offset, mapping.PDPT_offset, mapping.PD_offset);
+				const auto pde = Paging::GetPDEAddress(mapping);
+				const auto pde_info = Paging::GetPDEInfo(pde);
 
-				if ((*pde & ShdMem::PDE_PRESENT) == 0) {
-					*pde = (FilterAddress(pageAddress) & ShdMem::PDE_ADDRESS)
-						| ShdMem::PDE_READWRITE
-						| ShdMem::PDE_PRESENT;
-					
-					ShdMem::PTE* pt = VirtualMemory::GetPTAddress(mapping.PML4_offset, mapping.PDPT_offset, mapping.PD_offset);
+				if (!pde_info.present) {
+					Paging::SetPDEInfo(pde, {
+						.present = 1,
+						.readWrite = 1,
+						.address = FilterAddress(pageAddress)
+					});
+
+					const auto pt = Paging::GetPTAddress(mapping);
+					Paging::InvalidatePage(pt);
 					ShdMem::ZeroPage(pt);
 
 					if (descriptor->NumberOfPages == 0) {
@@ -141,16 +154,16 @@ PhysicalMemory::StatusCode PhysicalMemory::Setup() {
 					pageAddress = descriptor->PhysicalStart + ShdMem::FRAME_SIZE * (--descriptor->NumberOfPages);
 				}
 
-				ShdMem::PTE* pte = VirtualMemory::GetPTEAddress(
-                    mapping.PML4_offset,
-                    mapping.PDPT_offset,
-                    mapping.PD_offset,
-                    mapping.PT_offset
-                );
-				*pte = ShdMem::PTE_XD
-					| (FilterAddress(pageAddress) & ShdMem::PTE_ADDRESS)
-					| ShdMem::PTE_READWRITE
-					| ShdMem::PTE_PRESENT;
+				const auto pte = Paging::GetPTEAddress(mapping);
+
+				Paging::SetPTEInfo(pte, {
+					.present = 1,
+					.readWrite = 1,
+					.executeDisable = 1,
+					.address = FilterAddress(pageAddress)
+				});
+
+				Paging::InvalidatePage(reinterpret_cast<void*>(reinterpret_cast<uint64_t>(currentBlockPtr)));
 
 				if (descriptor->NumberOfPages == 0) {
 					continue;
@@ -246,7 +259,7 @@ void* PhysicalMemory::Allocate() {
 	return page;
 }
 
-void* PhysicalMemory::AllocatePages(uint64_t pages) {
+void* PhysicalMemory::AllocatePages(uint64_t pages, uint64_t alignment) {
 	if (pages == 0 || storedBlocks == 0 || availableMemory < ShdMem::FRAME_SIZE * pages) {
 		return nullptr;
 	}
@@ -311,73 +324,93 @@ PhysicalMemory::StatusCode PhysicalMemory::Free(void* ptr) {
 
 		ShdMem::VirtualAddress mapping = ShdMem::ParseVirtualAddress(blockPtr);
 
-		ShdMem::PML4E* pml4e = VirtualMemory::GetPML4EAddress(mapping.PML4_offset);
+		const auto pml4e = Paging::GetPML4EAddress(mapping);
+		const auto pml4e_info = Paging::GetPML4EInfo(pml4e);
 
-		if ((*pml4e & ShdMem::PML4E_PRESENT) == 0) {
+		if (!pml4e_info.present) {
 			void* _page = Allocate();
 
 			if (_page == nullptr) {
 				return StatusCode::OUT_OF_MEMORY;
 			}
 
-			*pml4e = (FilterAddress(_page) & ShdMem::PML4E_ADDRESS)
-				| ShdMem::PML4E_READWRITE
-				| ShdMem::PML4E_PRESENT;
+			Paging::SetPML4EInfo(pml4e, {
+				.present = 1,
+				.readWrite = 1,
+				.address = FilterAddress(_page)
+			});
 
-			ShdMem::PDPTE* pdpt = VirtualMemory::GetPDPTAddress(mapping.PML4_offset);
+			const auto pdpt = Paging::GetPDPTAddress(mapping);
+			Paging::InvalidatePage(pdpt);
 			ShdMem::ZeroPage(pdpt);
 		}
 
-		ShdMem::PDPTE* pdpte = VirtualMemory::GetPDPTEAddress(mapping.PML4_offset, mapping.PDPT_offset);
+		const auto pdpte = Paging::GetPDPTEAddress(mapping);
+		const auto pdpte_info = Paging::GetPDPTEInfo(pdpte);
 
-		if ((*pdpte & ShdMem::PDPTE_PRESENT) == 0) {
+		if (!pdpte_info.present) {
 			void* _page = Allocate();
 
 			if (_page == nullptr) {
 				return StatusCode::OUT_OF_MEMORY;
 			}
 
-			*pdpte = (FilterAddress(_page) & ShdMem::PDPTE_ADDRESS)
-				| ShdMem::PDPTE_READWRITE
-				| ShdMem::PDPTE_PRESENT;
+			Paging::SetPDPTEInfo(pdpte, {
+				.present = 1,
+				.readWrite = 1,
+				.address = FilterAddress(_page)
+			});
 
-			ShdMem::PDE* pd = VirtualMemory::GetPDAddress(mapping.PML4_offset, mapping.PDPT_offset);
+			const auto pd = Paging::GetPDAddress(mapping);
+			Paging::InvalidatePage(pd);
 			ShdMem::ZeroPage(pd);
 		}
 
-		ShdMem::PDE* pde = VirtualMemory::GetPDEAddress(mapping.PML4_offset, mapping.PDPT_offset, mapping.PDPT_offset);
+		const auto pde = Paging::GetPDEAddress(mapping);
+		const auto pde_info = Paging::GetPDEInfo(pde);
 
-		if ((*pde & ShdMem::PDE_PRESENT) == 0) {
+		if (!pde_info.present) {
 			void* _page = Allocate();
 
 			if (_page == nullptr) {
 				return StatusCode::OUT_OF_MEMORY;
 			}
 
-			*pde = (FilterAddress(_page) & ShdMem::PDE_ADDRESS)
-				| ShdMem::PDE_READWRITE
-				| ShdMem::PDE_PRESENT;
+			Paging::SetPDEInfo(pde, {
+				.present = 1,
+				.readWrite = 1,
+				.address = FilterAddress(_page)
+			});
 
-			ShdMem::PTE* pt = VirtualMemory::GetPTAddress(mapping.PML4_offset, mapping.PDPT_offset, mapping.PD_offset);
+			const auto pt = Paging::GetPTAddress(mapping);
+			Paging::InvalidatePage(pt);
 			ShdMem::ZeroPage(pt);
 		}
 
-		ShdMem::PTE* pte = VirtualMemory::GetPTEAddress(mapping.PML4_offset, mapping.PDPT_offset, mapping.PD_offset, mapping.PT_offset);
+		const auto pte = Paging::GetPTEAddress(mapping);
 		void* _page = Allocate();
+		
 		availableBlockMemory += ShdMem::FRAME_SIZE;
 
 		if (_page == nullptr) {
-			*pte = ShdMem::PTE_XD
-				| (FilterAddress(ptr) & ShdMem::PTE_ADDRESS)
-				| ShdMem::PTE_READWRITE
-				| ShdMem::PTE_PRESENT;
+			Paging::SetPTEInfo(pte, {
+				.present = 1,
+				.readWrite = 1,
+				.executeDisable = 1,
+				.address = FilterAddress(ptr)
+			});
+			
 			return StatusCode::SUCCESS;
 		}
 
-		*pte = ShdMem::PTE_XD
-			| (FilterAddress(_page) & ShdMem::PTE_ADDRESS)
-			| ShdMem::PTE_READWRITE
-			| ShdMem::PTE_PRESENT;
+		Paging::SetPTEInfo(pte, {
+			.present = 1,
+			.readWrite = 1,
+			.executeDisable = 1,
+			.address = FilterAddress(_page)
+		});
+
+		Paging::InvalidatePage(reinterpret_cast<void*>(blockPtr));
 	}
 
 	blockPtr->availablePages = 1;
@@ -404,73 +437,90 @@ PhysicalMemory::StatusCode PhysicalMemory::FreePages(void* ptr, uint64_t pages) 
 
 		ShdMem::VirtualAddress mapping = ShdMem::ParseVirtualAddress(blockPtr);
 
-		ShdMem::PML4E* pml4e = VirtualMemory::GetPML4EAddress(mapping.PML4_offset);
+		const auto pml4e = Paging::GetPML4EAddress(mapping);
+		const auto pml4e_info = Paging::GetPML4EInfo(pml4e);
 
-		if ((*pml4e & ShdMem::PML4E_PRESENT) == 0) {
+		if (!pml4e_info.present) {
 			void* _page = Allocate();
 
 			if (_page == nullptr) {
 				return StatusCode::OUT_OF_MEMORY;
 			}
 
-			*pml4e = (FilterAddress(_page) & ShdMem::PML4E_ADDRESS)
-				| ShdMem::PML4E_READWRITE
-				| ShdMem::PML4E_PRESENT;
+			Paging::SetPML4EInfo(pml4e, {
+				.present = 1,
+				.readWrite = 1,
+				.address = FilterAddress(_page)
+			});
 
-			ShdMem::PDPTE* pdpt = VirtualMemory::GetPDPTAddress(mapping.PML4_offset);
+			const auto pdpt = Paging::GetPDPTAddress(mapping);
+			Paging::InvalidatePage(pdpt);
 			ShdMem::ZeroPage(pdpt);
 		}
 
-		ShdMem::PDPTE* pdpte = VirtualMemory::GetPDPTEAddress(mapping.PML4_offset, mapping.PDPT_offset);
+		const auto pdpte = Paging::GetPDPTEAddress(mapping);
+		const auto pdpte_info = Paging::GetPDPTEInfo(pdpte);
 
-		if ((*pdpte & ShdMem::PDPTE_PRESENT) == 0) {
+		if (!pdpte_info.present) {
 			void* _page = Allocate();
 
 			if (_page == nullptr) {
 				return StatusCode::OUT_OF_MEMORY;
 			}
 
-			*pdpte = (FilterAddress(_page) & ShdMem::PDPTE_ADDRESS)
-				| ShdMem::PDPTE_READWRITE
-				| ShdMem::PDPTE_PRESENT;
+			Paging::SetPDPTEInfo(pdpte, {
+				.present = 1,
+				.readWrite = 1,
+				.address = FilterAddress(_page)
+			});
 
-			ShdMem::PDE* pd = VirtualMemory::GetPDAddress(mapping.PML4_offset, mapping.PDPT_offset);
+			const auto pd = Paging::GetPDAddress(mapping);
+			Paging::InvalidatePage(pd);
 			ShdMem::ZeroPage(pd);
 		}
 
-		ShdMem::PDE* pde = VirtualMemory::GetPDEAddress(mapping.PML4_offset, mapping.PDPT_offset, mapping.PDPT_offset);
+		const auto pde = Paging::GetPDEAddress(mapping);
+		const auto pde_info = Paging::GetPDEInfo(pde);
 
-		if ((*pde & ShdMem::PDE_PRESENT) == 0) {
+		if (!pde_info.present) {
 			void* _page = Allocate();
 
 			if (_page == nullptr) {
 				return StatusCode::OUT_OF_MEMORY;
 			}
 
-			*pde = (FilterAddress(_page) & ShdMem::PDE_ADDRESS)
-				| ShdMem::PDE_READWRITE
-				| ShdMem::PDE_PRESENT;
+			Paging::SetPDEInfo(pde, {
+				.present = 1,
+				.readWrite = 1,
+				.address = FilterAddress(_page)
+			});
 
-			ShdMem::PTE* pt = VirtualMemory::GetPTAddress(mapping.PML4_offset, mapping.PDPT_offset, mapping.PD_offset);
+			const auto pt = Paging::GetPTAddress(mapping);
+			Paging::InvalidatePage(pt);
 			ShdMem::ZeroPage(pt);
 		}
 
-		ShdMem::PTE* pte = VirtualMemory::GetPTEAddress(mapping.PML4_offset, mapping.PDPT_offset, mapping.PD_offset, mapping.PT_offset);
+		const auto pte = Paging::GetPTEAddress(mapping);
+
 		void* _page = Allocate();
 		availableBlockMemory += ShdMem::FRAME_SIZE;
 
 		if (_page == nullptr) {
-			*pte = ShdMem::PTE_XD
-				| (FilterAddress(ptr) & ShdMem::PTE_ADDRESS)
-				| ShdMem::PTE_READWRITE
-				| ShdMem::PTE_PRESENT;
+			Paging::SetPTEInfo(pte, {
+				.present = 1,
+				.readWrite = 1,
+				.executeDisable = 1,
+				.address = FilterAddress(ptr)
+			});
 			--pages;
 		}
 
-		*pte = ShdMem::PTE_XD
-			| (FilterAddress(_page) & ShdMem::PTE_ADDRESS)
-			| ShdMem::PTE_READWRITE
-			| ShdMem::PTE_PRESENT;
+		Paging::SetPTEInfo(pte, {
+			.present = 1,
+			.readWrite = 1,
+			.executeDisable = 1,
+			.address = FilterAddress(_page)
+		});
 	}
 
 	blockPtr->availablePages = pages;
@@ -478,5 +528,25 @@ PhysicalMemory::StatusCode PhysicalMemory::FreePages(void* ptr, uint64_t pages) 
 	++storedBlocks;
 	availableBlockMemory -= sizeof(MemMapBlock);
 	availableMemory += ShdMem::FRAME_SIZE * pages;
+	return StatusCode::SUCCESS;
+}
+
+void* PhysicalMemory::Allocate2MBPage() {
+	__asm__ volatile("int $0xAA");
+	return nullptr;
+}
+
+PhysicalMemory::StatusCode PhysicalMemory::Free2MBPage(void* ptr) {
+	__asm__ volatile("int $0xAB");
+	return StatusCode::SUCCESS;
+}
+
+void* PhysicalMemory::Allocate1GBPage() {
+	__asm__ volatile("int $0xAC");
+	return nullptr;
+}
+
+PhysicalMemory::StatusCode PhysicalMemory::Free1GBPage(void* ptr) {
+	__asm__ volatile("int $0xAD");
 	return StatusCode::SUCCESS;
 }

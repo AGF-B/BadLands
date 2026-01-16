@@ -5,8 +5,10 @@
 #include <interrupts/Panic.hpp>
 
 #include <mm/Heap.hpp>
+#include <mm/Paging.hpp>
 #include <mm/VirtualMemory.hpp>
 #include <mm/VirtualMemoryLayout.hpp>
+
 #include <sched/TaskContext.hpp>
 
 namespace Scheduling {
@@ -37,14 +39,11 @@ namespace Scheduling {
             VirtualMemoryLayout::KernelStackReserve.start
         );
 
-        auto* context_pte = VirtualMemory::GetPTEAddress<false>(
-            mapping.PML4_offset,
-            mapping.PDPT_offset,
-            mapping.PD_offset,
-            mapping.PT_offset
-        );
+        const auto context_pte = Paging::GetPTEAddress(mapping, false);
+        const auto pte_info = Paging::GetPTEInfo(context_pte);
 
-        void* physical_frame = reinterpret_cast<void*>(*context_pte & Shared::Memory::PTE_ADDRESS);
+        void* physical_frame = reinterpret_cast<void*>(pte_info.address);
+        
         void* mapped_frame = VirtualMemory::MapGeneralPages(physical_frame, 1, 
             Shared::Memory::PTE_PRESENT | Shared::Memory::PTE_READWRITE
         );

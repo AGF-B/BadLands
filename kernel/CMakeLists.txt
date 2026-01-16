@@ -50,6 +50,7 @@ add_executable(KERNEL_IMG
     "src/interrupts/RuntimeSvc.cpp"
     "src/mm/Heap.cpp"
     "src/mm/IOHeap.cpp"
+    "src/mm/Paging.cpp"
     "src/mm/PhysicalMemory.cpp"
     "src/mm/Utils.cpp"
     "src/mm/VirtualMemory.cpp"

@@ -6,6 +6,7 @@
 #include <interrupts/InterruptProvider.hpp>
 #include <interrupts/Panic.hpp>
 
+#include <mm/Paging.hpp>
 #include <mm/PhysicalMemory.hpp>
 #include <mm/VirtualMemory.hpp>
 
@@ -22,6 +23,36 @@ namespace {
     static inline constexpr uint64_t PF_HLAT                        = 0x00000080;
     static inline constexpr uint64_t PF_SGX_VIOLATION               = 0x00008000;
 
+    static void CheckUnmappedAccess(void* sp, const Shared::Memory::VirtualAddress& mapping, uint64_t errv) {
+        const auto pml4e = Paging::GetPML4EAddress(mapping);
+        const auto pdpte = Paging::GetPDPTEAddress(mapping);
+        const auto pde = Paging::GetPDEAddress(mapping);
+        const auto pte = Paging::GetPTEAddress(mapping);
+
+        const auto pml4e_info = Paging::GetPML4EInfo(pml4e);
+
+        if (pml4e_info.present){
+            const auto pdpte_info = Paging::GetPDPTEInfo(pdpte);
+
+            if (pdpte_info.present) {
+                const auto pde_info = Paging::GetPDEInfo(pde);
+
+                if (pde_info.present) {
+                    if (!pde_info.pageSize) {
+                        if (*pte != 0) {
+                            return;
+                        }
+                    }
+                    else {
+                        return;
+                    }
+                }
+            }
+        }
+
+        Panic::Panic(sp, "UNMAPPED MEMORY ACCESS\n\r", errv);
+    }
+
     static void PageFaultHandler(void* sp, uint64_t errv) {
         if ((errv & PF_PRESENT) == 1) {
             Panic::Panic(sp, "PAGE FAULT VIOLATION\n\r", errv);
@@ -30,55 +61,48 @@ namespace {
             uint64_t CR2 = 0;
             __asm__ volatile("mov %%cr2, %0" : "=r"(CR2));
 
-            ShdMem::VirtualAddress mapping = ShdMem::ParseVirtualAddress(CR2);
-            VirtualMemory::PML4E* pml4e = VirtualMemory::GetPML4EAddress(mapping.PML4_offset);
-            VirtualMemory::PDPTE* pdpte = VirtualMemory::GetPDPTEAddress(mapping.PML4_offset, mapping.PDPT_offset);
-            VirtualMemory::PDE* pde = VirtualMemory::GetPDEAddress(
-                mapping.PML4_offset,
-                mapping.PDPT_offset,
-                mapping.PD_offset
-            );
-            VirtualMemory::PTE* pte = VirtualMemory::GetPTEAddress(
-                mapping.PML4_offset,
-                mapping.PDPT_offset,
-                mapping.PD_offset,
-                mapping.PT_offset
-            );
+            const auto mapping = ShdMem::ParseVirtualAddress(CR2);
 
-            if ((*pml4e & ShdMem::PML4E_PRESENT) == 0
-                || (*pdpte & ShdMem::PDPTE_PRESENT) == 0
-                || (*pde & ShdMem::PDE_PRESENT) == 0
-                || *pte == 0) {
-                Panic::Panic(sp, "WHAT DID YOU THINK WOULD HAPPEN??\n\r", errv);
-            }
-            
-            uint64_t PRESENT = ShdMem::PTE_PRESENT;
-            uint64_t READWRITE = *pte & VirtualMemory::NP_READWRITE;
-            uint64_t USERMODE = *pte & VirtualMemory::NP_USERMODE;
-            uint64_t PWT = *pte & VirtualMemory::NP_PWT;
-            uint64_t PCD = *pte & VirtualMemory::NP_PCD;
-            uint64_t PAT = (*pte & VirtualMemory::NP_PAT) << 2;
-            uint64_t GLOBAL = (*pte & VirtualMemory::NP_GLOBAL) << 2;
-            uint64_t PK = (*pte & VirtualMemory::NP_PK) << 34;
-            
-            if ((*pte & VirtualMemory::NP_ON_DEMAND) == 0) {
-                Panic::Panic(sp, "MEMORY SWAPPING UNSUPPORTED\n\r", errv);
+            CheckUnmappedAccess(sp, mapping, errv);
+
+            const auto pde = Paging::GetPDEAddress(mapping);
+            const auto pde_info = Paging::GetPDEInfo(pde);
+
+            if (pde_info.pageSize) {
+                Panic::Panic(sp, "HUGE PAGE ERROR\n\r", errv);
             }
             else {
-                void* page = PhysicalMemory::Allocate();
-                if (page == nullptr) {
-                    Panic::Panic(sp, "THE COCONUT WENT NUTS (OUT OF MEMORY)\n\r", errv);
-                }
+                const auto pte = Paging::GetPTEAddress(mapping);
 
-                *pte = PK
-                    | (PhysicalMemory::FilterAddress(page) & ShdMem::PTE_ADDRESS)
-                    | GLOBAL
-                    | PAT
-                    | PCD
-                    | PWT
-                    | USERMODE
-                    | READWRITE
-                    | PRESENT;
+                const uint64_t PRESENT = ShdMem::PTE_PRESENT;
+                const uint64_t READWRITE = *pte & VirtualMemory::NP_READWRITE;
+                const uint64_t USERMODE = *pte & VirtualMemory::NP_USERMODE;
+                const uint64_t PWT = *pte & VirtualMemory::NP_PWT;
+                const uint64_t PCD = *pte & VirtualMemory::NP_PCD;
+                const uint64_t PAT = (*pte & VirtualMemory::NP_PAT) << 2;
+                const uint64_t GLOBAL = (*pte & VirtualMemory::NP_GLOBAL) << 2;
+                const uint64_t PK = (*pte & VirtualMemory::NP_PK) << 34;
+                
+                if ((*pte & VirtualMemory::NP_ON_DEMAND) == 0) {
+                    Panic::Panic(sp, "MEMORY SWAPPING UNSUPPORTED\n\r", errv);
+                }
+                else {
+                    void* page = PhysicalMemory::Allocate();
+
+                    if (page == nullptr) {
+                        Panic::Panic(sp, "KERNEL OUT OF MEMORY\n\r", errv);
+                    }
+
+                    *pte = PK
+                        | (PhysicalMemory::FilterAddress(page) & ShdMem::PTE_ADDRESS)
+                        | GLOBAL
+                        | PAT
+                        | PCD
+                        | PWT
+                        | USERMODE
+                        | READWRITE
+                        | PRESENT;
+                }
             }
         }
     }

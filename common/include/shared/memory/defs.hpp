@@ -40,7 +40,9 @@ namespace Shared {
         inline constexpr uint64_t PDPTE_DIRTY        = 0x0000000000000040;
         inline constexpr uint64_t PDPTE_PAGE_SIZE    = 0x0000000000000080;
         inline constexpr uint64_t PDPTE_GLOBAL       = 0x0000000000000100;
+        inline constexpr uint64_t PDPTE_PAT          = 0x0000000000001000;
         inline constexpr uint64_t PDPTE_ADDRESS      = 0x000FFFFFFFFFF000;
+        inline constexpr uint64_t PDPTE_1GB_ADDRESS  = 0x000FFFFFC0000000;
         inline constexpr uint64_t PDPTE_XD           = 0x8000000000000000;
 
         inline constexpr uint64_t PDE_PRESENT        = 0x0000000000000001;
@@ -52,7 +54,9 @@ namespace Shared {
         inline constexpr uint64_t PDE_DIRTY          = 0x0000000000000040;
         inline constexpr uint64_t PDE_PAGE_SIZE      = 0x0000000000000080;
         inline constexpr uint64_t PDE_GLOBAL         = 0x0000000000000100;
+        inline constexpr uint64_t PDE_PAT            = 0x0000000000001000;
         inline constexpr uint64_t PDE_ADDRESS        = 0x000FFFFFFFFFF000;
+        inline constexpr uint64_t PDE_2MB_ADDRESS    = 0x000FFFFFFFE00000;
         inline constexpr uint64_t PDE_PK             = 0x7800000000000000;
         inline constexpr uint64_t PDE_XD             = 0x8000000000000000;
 
@@ -68,6 +72,8 @@ namespace Shared {
         inline constexpr uint64_t PTE_ADDRESS        = 0x000FFFFFFFFFF000;
         inline constexpr uint64_t PTE_PK             = 0x7800000000000000;
         inline constexpr uint64_t PTE_XD             = 0x8000000000000000;
+
+        inline constexpr uint64_t PDE_UNCACHEABLE     = PDE_PCD | PDE_PWT;
 
         inline constexpr uint64_t PTE_WRITEBACK         = 0;
         inline constexpr uint64_t PTE_WRITETHROUGH      = PTE_PWT;
