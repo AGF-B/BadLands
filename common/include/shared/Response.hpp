@@ -38,6 +38,20 @@ public:
         return value;
     }
 
+    inline void ClearValue() {
+        hasValue = false;
+    }
+
+    inline void SetValue(const T& newValue) {
+        value = newValue;
+        hasValue = true;
+    }
+
+    inline T GetValueAndClear() {
+        hasValue = false;
+        return value;
+    }
+
 private:
     bool hasValue;
     [[maybe_unused]] T value;
