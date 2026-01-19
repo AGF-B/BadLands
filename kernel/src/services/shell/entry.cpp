@@ -16,6 +16,7 @@
 #include <interrupts/Panic.hpp>
 
 #include <mm/Heap.hpp>
+#include <mm/Utils.hpp>
 
 #include <screen/Log.hpp>
 
@@ -27,6 +28,8 @@ namespace {
     static_assert(BUFFER_SIZE % PAGE_SIZE == 0);
 
     char* InputBuffer;
+    size_t InputBufferPosition = 0;
+    bool InputBufferOverflow = false;
 }
 
 namespace Services {
@@ -57,8 +60,11 @@ namespace Services {
 
             Log::putsSafe("[SHELL] Kernel shell initialized\n\r");
 
-            while (true) {
+            Log::putsSafe("> ");
+
+            while (true) {                
                 __asm__ volatile("hlt");
+
                 Devices::KeyboardDispatcher::BasicKeyPacket packet;
 
                 auto v = keyboardBuffer->Read(0, sizeof(packet), reinterpret_cast<uint8_t*>(&packet));
@@ -71,12 +77,22 @@ namespace Services {
                         auto vpkt = Devices::KeyboardDispatcher::GetVirtualKeyPacket(packet);
 
                         if (vpkt.flags & Devices::KeyboardDispatcher::FLAG_KEY_PRESSED) {
-                            char c = '\0';
-
                             bool shift = (vpkt.flags & Devices::KeyboardDispatcher::FLAG_LEFT_SHIFT) ||
                                          (vpkt.flags & Devices::KeyboardDispatcher::FLAG_RIGHT_SHIFT);
 
+                            bool control = (vpkt.flags & Devices::KeyboardDispatcher::FLAG_LEFT_CONTROL) ||
+                                           (vpkt.flags & Devices::KeyboardDispatcher::FLAG_RIGHT_CONTROL);
+
+                            bool alt = (vpkt.flags & Devices::KeyboardDispatcher::FLAG_LEFT_ALT) ||
+                                       (vpkt.flags & Devices::KeyboardDispatcher::FLAG_RIGHT_ALT);
+                            
+                            if (control || alt) {
+                                continue;
+                            }
+
                             char shift_offset = shift ? 'A' - 'a' : 0;
+
+                            char c = '\0';
 
                             switch (vpkt.keycode) {
                                 case VK_A: c = 'a' + shift_offset; break;
@@ -105,13 +121,57 @@ namespace Services {
                                 case VK_X: c = 'x' + shift_offset; break;
                                 case VK_Y: c = 'y' + shift_offset; break;
                                 case VK_Z: c = 'z' + shift_offset; break;
+                                case VK_0: c = shift ? ')' : '0'; break;
+                                case VK_1: c = shift ? '!' : '1'; break;
+                                case VK_2: c = shift ? '@' : '2'; break;
+                                case VK_3: c = shift ? '#' : '3'; break;
+                                case VK_4: c = shift ? '$' : '4'; break;
+                                case VK_5: c = shift ? '%' : '5'; break;
+                                case VK_6: c = shift ? '^' : '6'; break;
+                                case VK_7: c = shift ? '&' : '7'; break;
+                                case VK_8: c = shift ? '*' : '8'; break;
+                                case VK_9: c = shift ? '(' : '9'; break;
                                 case VK_SPACE: c = ' '; break;
                                 case VK_RETURN: c = '\n'; break;
-                                case VK_BACK: c = '\b'; break;
+                                case VK_BACK:
+                                    InputBufferPosition = (InputBufferPosition > 0) ? InputBufferPosition - 1 : 0;
+                                    Log::putcSafe('\b');
+                                    break;
                                 default: break;
                             }
 
-                            Log::putcSafe(c);
+                            if (c != '\0' && c != '\n') {
+                                Log::putcSafe(c);
+
+                                if (InputBufferPosition < BUFFER_SIZE - 1) {
+                                    InputBuffer[InputBufferPosition++] = c;
+                                }
+                                else {
+                                    InputBufferOverflow = true;
+                                }
+                            }
+                            else if (c == '\n') {
+                                Log::putsSafe("\n\r");
+
+                                if (InputBufferOverflow) {
+                                    Log::putsSafe("[SHELL] Command too long.\n\r");
+                                    InputBufferOverflow = false;
+                                }
+                                else {
+                                    if (Utils::memcmp(InputBuffer, "clear", 5) == 0 && InputBufferPosition == 5) {
+                                        Log::clear();
+                                    }
+                                    else {
+                                        Log::putsSafe("[SHELL] Unknown command: ");
+                                        Log::putsSafe(InputBuffer);
+                                        Log::putsSafe("\n\r");
+                                    }
+                                }
+
+                                Log::putsSafe("> ");
+
+                                InputBufferPosition = 0;
+                            }
                         }
                     }
                 }

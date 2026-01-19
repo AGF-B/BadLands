@@ -18,4 +18,6 @@ namespace Log {
 	void putsSafe(const char* s);
 	void vprintfSafe(const char* format, va_list args);
 	void printfSafe(const char* format, ...);
+
+	void clear();
 }
