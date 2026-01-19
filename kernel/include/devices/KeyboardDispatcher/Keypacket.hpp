@@ -12,7 +12,7 @@ namespace Devices {
 		static inline constexpr uint16_t FLAG_RIGHT_SHIFT 	= 0x20;
 		static inline constexpr uint16_t FLAG_RIGHT_ALT   	= 0x40;
 		static inline constexpr uint16_t FLAG_RIGHT_GUI   	= 0x80;
-		static inline constexpr uint16_t FLAG_KEY_PRESSED	= 0x10;
+		static inline constexpr uint16_t FLAG_KEY_PRESSED	= 0x100;
 
 		struct BasicKeyPacket {
 			uint8_t scancode;

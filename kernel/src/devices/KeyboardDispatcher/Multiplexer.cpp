@@ -81,13 +81,12 @@ namespace {
 			}
 
 			const size_t packets = count / PACKET_SIZE;
-			const size_t written_packets = packets > remaining_space ? remaining_space : packets;
+			const size_t written_packets = packets > remaining_space ? remaining_space : packets;			
+			available_packets_count += written_packets;
 
 			for (size_t i = 0; i < written_packets; ++i, buffer += PACKET_SIZE) {
 				Utils::memcpy(this->buffer + ((location + available_packets + i) % CAPACITY) * PACKET_SIZE, buffer, PACKET_SIZE);
 			}
-
-			available_packets_count += written_packets;
 
 			return FS::Response(written_packets * PACKET_SIZE);
 		}

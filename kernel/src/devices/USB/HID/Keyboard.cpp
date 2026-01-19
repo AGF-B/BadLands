@@ -16,8 +16,6 @@
 #include <mm/Heap.hpp>
 #include <mm/Utils.hpp>
 
-#include <screen/Log.hpp>
-
 namespace Devices::USB::HID {
     Keyboard::Report* Keyboard::Report::Release() {
         if (items != nullptr) {
