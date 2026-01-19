@@ -180,6 +180,68 @@ namespace Utils {
             }
         }
 
+        inline constexpr operator+=(const T& addend) {
+            if constexpr (sizeof(T) == 1) {
+                return static_cast<T>(__blatomic_add_fetch_1(
+                    reinterpret_cast<volatile uint8_t*>(&atomic_value),
+                    addend,
+                    Order
+                ));
+            }
+            else if constexpr (sizeof(T) == 2) {
+                return static_cast<T>(__blatomic_add_fetch_2(
+                    reinterpret_cast<volatile uint16_t*>(&atomic_value),
+                    addend,
+                    Order
+                ));
+            }
+            else if constexpr (sizeof(T) == 4) {
+                return static_cast<T>(__blatomic_add_fetch_4(
+                    reinterpret_cast<volatile uint32_t*>(&atomic_value),
+                    addend,
+                    Order
+                ));
+            }
+            else if constexpr (sizeof(T) == 8) {
+                return static_cast<T>(__blatomic_add_fetch_8(
+                    reinterpret_cast<volatile uint64_t*>(&atomic_value),
+                    addend,
+                    Order
+                ));
+            }
+        }
+
+        inline constexpr operator-=(const T& subtrahend) {
+            if constexpr (sizeof(T) == 1) {
+                return static_cast<T>(__blatomic_sub_fetch_1(
+                    reinterpret_cast<volatile uint8_t*>(&atomic_value),
+                    subtrahend,
+                    Order
+                ));
+            }
+            else if constexpr (sizeof(T) == 2) {
+                return static_cast<T>(__blatomic_sub_fetch_2(
+                    reinterpret_cast<volatile uint16_t*>(&atomic_value),
+                    subtrahend,
+                    Order
+                ));
+            }
+            else if constexpr (sizeof(T) == 4) {
+                return static_cast<T>(__blatomic_sub_fetch_4(
+                    reinterpret_cast<volatile uint32_t*>(&atomic_value),
+                    subtrahend,
+                    Order
+                ));
+            }
+            else if constexpr (sizeof(T) == 8) {
+                return static_cast<T>(__blatomic_sub_fetch_8(
+                    reinterpret_cast<volatile uint64_t*>(&atomic_value),
+                    subtrahend,
+                    Order
+                ));
+            }
+        }
+
         inline bool compare_exchange(T& expected, T desired, [[maybe_unused]] MemoryOrder order = Order) volatile {
             if constexpr (sizeof(T) == 1) {
                 return __blatomic_compare_exchange_1(
