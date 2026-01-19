@@ -2,6 +2,7 @@
 
 #include <exports.hpp>
 
+#include <shared/Response.hpp>
 #include <shared/efi/efi.h>
 #include <shared/memory/layout.hpp>
 
@@ -60,19 +61,13 @@ namespace {
     }
 
     static inline void SetupPhysicalMemory() {
-        auto status = PhysicalMemory::Setup();
-        if (status != PhysicalMemory::StatusCode::SUCCESS) {
-            if (status == PhysicalMemory::StatusCode::OUT_OF_MEMORY) {
-                Panic::PanicShutdown("PMM INITIALIZATION FAILED (OUT OF MEMORY)\n\r");
-            }
-            else {
-                Panic::PanicShutdown("PMM INITIALIZATION FAILED (UNKNOWN REASON)\n\r");
-            }
+        if (!PhysicalMemory::Setup().IsSuccess()) {
+            Panic::PanicShutdown("PMM INITIALIZATION FAILEDs\n\r");
         }
     }
 
     static inline void SetupVirtualMemory() {
-        if (VirtualMemory::Setup() != VirtualMemory::StatusCode::SUCCESS) {
+        if (!VirtualMemory::Setup().IsSuccess()) {
             Panic::PanicShutdown("VMM INITIALIZATION FAILED\n\r");
         }
     }

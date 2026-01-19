@@ -7,6 +7,7 @@
 #include <shared/memory/defs.hpp>
 
 #include <mm/IOHeap.hpp>
+#include <mm/PhysicalMemory.hpp>
 #include <mm/VirtualMemory.hpp>
 
 namespace ShdMem = Shared::Memory;
@@ -32,20 +33,22 @@ namespace IOHeap {
 
     Success Create() {
         if (head == nullptr) {
-            head = static_cast<Metadata*>(VirtualMemory::AllocateKernelHeap(DEFAULT_PAGES, true, true));
+            void* const physical_region = PhysicalMemory::Allocate32MB();
 
-            if (head == nullptr) {
+            if (physical_region == nullptr) {
                 return Failure();
             }
 
-            if (VirtualMemory::ChangeMappingFlags(
-                head,
-                ShdMem::PDE_PAGE_SIZE | ShdMem::PDE_UNCACHEABLE | ShdMem::PDE_READWRITE | ShdMem::PDE_PRESENT,
-                DEFAULT_HUGE_PAGES,
-                true
-            ) != VirtualMemory::StatusCode::SUCCESS) {
-                VirtualMemory::FreeKernelHeap(head, DEFAULT_PAGES);
-                head = nullptr;
+            head = reinterpret_cast<Metadata*>(
+                VirtualMemory::MapGeneralPages(
+                    physical_region,
+                    DEFAULT_HUGE_PAGES,
+                    ShdMem::PDE_PAGE_SIZE | ShdMem::PDE_UNCACHEABLE | ShdMem::PDE_READWRITE | ShdMem::PDE_PRESENT
+                )
+            );
+
+            if (head == nullptr) {
+                PhysicalMemory::Free32MB(physical_region);
                 return Failure();
             }
 

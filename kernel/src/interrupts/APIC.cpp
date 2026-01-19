@@ -601,7 +601,7 @@ namespace APIC {
 			}
 		}
 
-		if (!ACPI::UnmapTable(madt)) {
+		if (!ACPI::UnmapTable(madt).IsSuccess()) {
 			Panic::PanicShutdown("APIC (COULD NOT UNMAP MADT)\n\r");
 		}
 

@@ -110,7 +110,7 @@ namespace Paging {
                 if (pte_info.present) {
                     const auto address = pte_info.address;
                     
-                    if (PhysicalMemory::Free(reinterpret_cast<void*>(address)) != PhysicalMemory::StatusCode::SUCCESS) {
+                    if (!PhysicalMemory::Free(reinterpret_cast<void*>(address)).IsSuccess()) {
                         return Failure();
                     }
                 }
@@ -135,7 +135,7 @@ namespace Paging {
                     if (pde_info.pageSize) {
                         const auto address = pde_info.address;
                         
-                        if (PhysicalMemory::Free2MBPage(reinterpret_cast<void*>(address)) != PhysicalMemory::StatusCode::SUCCESS) {
+                        if (!PhysicalMemory::Free2MB(reinterpret_cast<void*>(address)).IsSuccess()) {
                             return Failure();
                         }
                     }
@@ -148,9 +148,8 @@ namespace Paging {
             }
 
             const auto pdpte_info = GetPDPTEInfo(pdpte);
-            PhysicalMemory::Free(reinterpret_cast<void*>(pdpte_info.address));
 
-            return Success();
+            return PhysicalMemory::Free(reinterpret_cast<void*>(pdpte_info.address));
         }
 
         // Frees a PML4E/PDPT and all its children
@@ -166,7 +165,7 @@ namespace Paging {
                     if (pdpte_info.pageSize) {
                         const auto address = pdpte_info.address;
                         
-                        if (PhysicalMemory::Free1GBPage(reinterpret_cast<void*>(address)) != PhysicalMemory::StatusCode::SUCCESS) {
+                        if (!PhysicalMemory::Free1GB(reinterpret_cast<void*>(address)).IsSuccess()) {
                             return Failure();
                         }
                     }
@@ -179,9 +178,8 @@ namespace Paging {
             }
 
             const auto pml4e_info = GetPML4EInfo(pml4e);
-            PhysicalMemory::Free(reinterpret_cast<void*>(pml4e_info.address));
 
-            return Success();
+            return PhysicalMemory::Free(reinterpret_cast<void*>(pml4e_info.address));
         }
     }
 
@@ -206,7 +204,7 @@ namespace Paging {
                 if (pde_info.pageSize) {
                     const auto address = pde_info.address;
                     
-                    if (PhysicalMemory::Free2MBPage(reinterpret_cast<void*>(address)) != PhysicalMemory::StatusCode::SUCCESS) {
+                    if (!PhysicalMemory::Free2MB(reinterpret_cast<void*>(address)).IsSuccess()) {
                         return Failure();
                     }
                 }
@@ -230,7 +228,7 @@ namespace Paging {
                 if (pdpte_info.pageSize) {
                     const auto address = pdpte_info.address;
                     
-                    if (PhysicalMemory::Free1GBPage(reinterpret_cast<void*>(address)) != PhysicalMemory::StatusCode::SUCCESS) {
+                    if (!PhysicalMemory::Free1GB(reinterpret_cast<void*>(address)).IsSuccess()) {
                         return Failure();
                     }
                 }
@@ -578,11 +576,9 @@ namespace Paging {
 			| ShdMem::PML4E_READWRITE
             | (PhysicalMemory::FilterAddress(CR3) & ShdMem::PML4E_ADDRESS);
 
-		auto status = VirtualMemory::UnmapGeneralPages(vroot, 1);
-
-		if (status != VirtualMemory::StatusCode::SUCCESS) {
-			return Failure();
-		}
+		if (!VirtualMemory::UnmapGeneralPages(vroot, 1).IsSuccess()) {
+            return Failure();
+        }
 
 		UpdateSecondaryRecursiveMapping(CR3);
 
