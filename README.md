@@ -38,6 +38,7 @@ The listed versions are the ones I am currently using, feel free to use older or
 - ``sgdisk`` : GPT fdisk (sgdisk) version 1.0.10
 - ``mkdosfs`` : mkfs.fat 4.2 (2021-01-31)
 - ``mmd``, ``mcopy`` : Mtools version 4.0.48
+- OVMF UEFI Firmware. Prebuilt release binaries for x64 (CODE and VARS) can be found [here](https://retrage.github.io/edk2-nightly/).
 
 ## Compilation
 
