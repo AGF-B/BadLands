@@ -41,9 +41,68 @@ namespace {
 
     static_assert(BUFFER_SIZE % PAGE_SIZE == 0);
 
-    char* InputBuffer;
-    size_t InputBufferPosition = 0;
-    bool InputBufferOverflow = false;
+    struct CommandString {
+        const char* command;
+        size_t length;
+    };
+
+    class InputBuffer final {
+    private:
+        char* buffer    = nullptr;
+        size_t capacity = 0;
+        size_t position = 0;
+        
+    public:
+        explicit InputBuffer(size_t size) : capacity{size} {
+            buffer = static_cast<char*>(Heap::Allocate(size));
+
+            if (buffer != nullptr) {
+                Utils::memset(buffer, 0, size);
+                capacity = size;
+            }
+        }
+
+        ~InputBuffer() {
+            if (buffer != nullptr) {
+                Heap::Free(buffer);
+            }
+        }
+
+        bool IsValid() const {
+            return buffer != nullptr;
+        }
+
+        bool IsOverflowing() const {
+            // Reserve one character for null-terminator
+            return position >= capacity - 1;
+        }
+
+        void AppendChar(char c) {
+            if (!IsOverflowing()) {
+                buffer[position++] = c;
+            }
+        }
+
+        void OnBackspace() {
+            if (position > 0) {
+                buffer[--position] = '\0';
+            }
+        }
+
+        CommandString GetCommandString() const {
+            return CommandString {
+                .command = buffer,
+                .length = position
+            };
+        }
+
+        void Clear() {
+            if (position != 0) {
+                Utils::memset(buffer, 0, position);
+                position = 0;
+            }
+        }
+    };
 }
 
 namespace Services {
@@ -66,14 +125,13 @@ namespace Services {
 
             auto keyboardBuffer = response.GetValue();
 
-            InputBuffer = static_cast<char*>(Heap::Allocate(BUFFER_PAGES * PAGE_SIZE));
+            InputBuffer inputBuffer(BUFFER_SIZE);
 
-            if (InputBuffer == nullptr) {
+            if (!inputBuffer.IsValid()) {
                 Panic::PanicShutdown("(SHELL) COULD NOT START KERNEL SHELL\n\r");
             }
 
             Log::putsSafe("[SHELL] Kernel shell initialized\n\r");
-
             Log::putsSafe("> ");
 
             while (true) {                
@@ -148,43 +206,40 @@ namespace Services {
                                 case VK_SPACE: c = ' '; break;
                                 case VK_RETURN: c = '\n'; break;
                                 case VK_BACK:
-                                    InputBufferPosition = (InputBufferPosition > 0) ? InputBufferPosition - 1 : 0;
+                                    inputBuffer.OnBackspace();
                                     Log::putcSafe('\b');
                                     break;
                                 default: break;
                             }
 
                             if (c != '\0' && c != '\n') {
+                                inputBuffer.AppendChar(c);
                                 Log::putcSafe(c);
-
-                                if (InputBufferPosition < BUFFER_SIZE - 1) {
-                                    InputBuffer[InputBufferPosition++] = c;
-                                }
-                                else {
-                                    InputBufferOverflow = true;
-                                }
                             }
                             else if (c == '\n') {
                                 Log::putsSafe("\n\r");
 
-                                if (InputBufferOverflow) {
+                                if (inputBuffer.IsOverflowing()) {
                                     Log::putsSafe("[SHELL] Command too long.\n\r");
-                                    InputBufferOverflow = false;
                                 }
                                 else {
-                                    if (Utils::memcmp(InputBuffer, "clear", 5) == 0 && InputBufferPosition == 5) {
+                                    const auto command = inputBuffer.GetCommandString();
+                                    const char* const cmd_string = command.command;
+
+                                    if (command.length == 5 && Utils::memcmp(cmd_string, "clear", 5) == 0) {
                                         Log::clear();
                                     }
                                     else {
+                                        Log::printfSafe("Command length: %u\n\r", static_cast<unsigned>(command.length));
                                         Log::putsSafe("[SHELL] Unknown command: ");
-                                        Log::putsSafe(InputBuffer);
+                                        Log::putsSafe(cmd_string);
                                         Log::putsSafe("\n\r");
                                     }
                                 }
 
-                                Log::putsSafe("> ");
+                                inputBuffer.Clear();
 
-                                InputBufferPosition = 0;
+                                Log::putsSafe("> ");
                             }
                         }
                     }
