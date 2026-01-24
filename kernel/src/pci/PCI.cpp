@@ -163,34 +163,34 @@ namespace PCI {
                             }
                         }
                     }
-                }
 
-                if ((device_ecam->HeaderType & 0x80) != 0) {
-                    for (size_t function = 0; function < 8; ++function) {
-                        PCI_CS* phys_function_ecam = reinterpret_cast<PCI_CS*>(
-                            ECAM_CS + ((bus) << 20 | (device) << 15 | (function) << 12)
-                        );
-                        PCI_CS* function_ecam = reinterpret_cast<PCI_CS*>(
-                            VirtualMemory::MapGeneralPages(phys_function_ecam, 1, flags)
-                        );
-
-                        if (function_ecam == nullptr) {
-                            Panic::PanicShutdown("COULD NOT RESERVE PAGE FOR FUNCTION ECAM\n\r");
-                        }
-
-                        if (function_ecam->VendorID != 0xFFFF) {
-                            Log::printfSafe(
-                                "\tFunction found (class=%u,subclass=%u,pi=%u,bus=%u,device=%u,function=%u)\n\r",
-                                function_ecam->BaseClassCode,
-                                function_ecam->SubclassCode,
-                                function_ecam->ProgrammingInterface,
-                                bus,
-                                device,
-                                function
+                    if ((device_ecam->HeaderType & 0x80) != 0) {
+                        for (size_t function = 1; function < 8; ++function) {
+                            PCI_CS* phys_function_ecam = reinterpret_cast<PCI_CS*>(
+                                ECAM_CS + ((bus) << 20 | (device) << 15 | (function) << 12)
                             );
-                        }
+                            PCI_CS* function_ecam = reinterpret_cast<PCI_CS*>(
+                                VirtualMemory::MapGeneralPages(phys_function_ecam, 1, flags)
+                            );
 
-                        VirtualMemory::UnmapGeneralPages(function_ecam, 1);
+                            if (function_ecam == nullptr) {
+                                Panic::PanicShutdown("COULD NOT RESERVE PAGE FOR FUNCTION ECAM\n\r");
+                            }
+
+                            if (function_ecam->VendorID != 0xFFFF) {
+                                Log::printfSafe(
+                                    "\tFunction found (class=%u,subclass=%u,pi=%u,bus=%u,device=%u,function=%u)\n\r",
+                                    function_ecam->BaseClassCode,
+                                    function_ecam->SubclassCode,
+                                    function_ecam->ProgrammingInterface,
+                                    bus,
+                                    device,
+                                    function
+                                );
+                            }
+
+                            VirtualMemory::UnmapGeneralPages(function_ecam, 1);
+                        }
                     }
                 }
 
