@@ -17,6 +17,7 @@
 
 #include <new>
 
+#include <shared/Debug.hpp>
 #include <shared/Response.hpp>
 
 #include <devices/USB/HID/Device.hpp>
@@ -156,14 +157,20 @@ namespace Devices::USB::HID {
         auto extra = interface->GetExtra(HIDDescriptor::DESCRIPTOR_TYPE);
 
         if (!extra.HasValue()) {
-            Log::printfSafe("[HID] Could not find HID descriptor in interface extra descriptors\n\r");
+            if constexpr (Debug::DEBUG_HID_ERRORS) {
+                Log::printfSafe("[HID] Could not find HID descriptor in interface extra descriptors\n\r");
+            }
+
             return Optional<HIDDescriptor>();
         }
 
         auto* hid_descriptor_data = extra.GetValue();
 
         if (hid_descriptor_data->length < HIDDescriptor::DESCRIPTOR_SIZE) {
-            Log::printfSafe("[HID] HID descriptor size is too small (%u bytes)\n\r", hid_descriptor_data->length);
+            if constexpr (Debug::DEBUG_HID_ERRORS) {
+                Log::printfSafe("[HID] HID descriptor size is too small (%u bytes)\n\r", hid_descriptor_data->length);
+            }
+
             return Optional<HIDDescriptor>();
         }
 
@@ -179,7 +186,10 @@ namespace Devices::USB::HID {
         descriptor.descriptorsNumber  = data[3];
 
         if (length < static_cast<size_t>(6 + descriptor.descriptorsNumber * 3)) {
-            Log::printfSafe("[HID] HID descriptor size is too small for %u class descriptors\n\r", descriptor.descriptorsNumber);
+            if constexpr (Debug::DEBUG_HID_ERRORS) {
+                Log::printfSafe("[HID] HID descriptor size is too small for %u class descriptors\n\r", descriptor.descriptorsNumber);
+            }
+
             return Optional<HIDDescriptor>();
         }
 
@@ -195,7 +205,10 @@ namespace Devices::USB::HID {
             }
         }
 
-        Log::printfSafe("[HID] Could not find report descriptor in HID descriptor\n\r");
+        if constexpr (Debug::DEBUG_HID_ERRORS) {
+            Log::printfSafe("[HID] Could not find report descriptor in HID descriptor\n\r");
+        }
+
         return Optional<HIDDescriptor>();
     }
 
@@ -368,7 +381,10 @@ namespace Devices::USB::HID {
                 auto global_event_wrapper = HandleGlobalItem(item, device);
 
                 if (!global_event_wrapper.HasValue()) {
-                    Log::printfSafe("[HID] Unsupported global item - Tag: 0x%0.2hhx, Value: 0x%0.8x\n\r", item.tag, item.value);
+                    if constexpr (Debug::DEBUG_HID_ERRORS) {
+                        Log::printfSafe("[HID] Unsupported global item - Tag: 0x%0.2hhx, Value: 0x%0.8x\n\r", item.tag, item.value);
+                    }
+
                     hierarchy.Release();
                     return Optional<HIDHierarchy>();
                 }
@@ -377,7 +393,10 @@ namespace Devices::USB::HID {
                 uint32_t previous_usage = localState.usage;
 
                 if (!HandleLocalItem(item, device).IsSuccess()) {
-                    Log::printfSafe("[HID] Unsupported local item - Tag: 0x%0.2hhx, Value: 0x%0.8x\n\r", item.tag, item.value);
+                    if constexpr (Debug::DEBUG_HID_ERRORS) {
+                        Log::printfSafe("[HID] Unsupported local item - Tag: 0x%0.2hhx, Value: 0x%0.8x\n\r", item.tag, item.value);
+                    }
+
                     hierarchy.Release();
                     return Optional<HIDHierarchy>();
                 }
@@ -392,7 +411,10 @@ namespace Devices::USB::HID {
                                 auto* const raw = Heap::Allocate(sizeof(Keyboard));
 
                                 if (raw == nullptr) {
-                                    Log::printfSafe("[HID] Could not allocate memory for Keyboard device\n\r");
+                                    if constexpr (Debug::DEBUG_HID_ERRORS) {
+                                        Log::printfSafe("[HID] Could not allocate memory for Keyboard device\n\r");
+                                    }
+
                                     hierarchy.Release();
                                     return Optional<HIDHierarchy>();
                                 }
@@ -400,7 +422,10 @@ namespace Devices::USB::HID {
                                 auto* const dev = new (raw) Keyboard;
 
                                 if (!hierarchy.AddDevice(dev).IsSuccess()) {
-                                    Log::printfSafe("[HID] Could not add Keyboard device to hierarchy\n\r");
+                                    if constexpr (Debug::DEBUG_HID_ERRORS) {
+                                        Log::printfSafe("[HID] Could not add Keyboard device to hierarchy\n\r");
+                                    }
+                                    
                                     dev->Release();
                                     hierarchy.Release();
                                     return Optional<HIDHierarchy>();
@@ -413,13 +438,19 @@ namespace Devices::USB::HID {
                             }
                         }
                         else {
-                            Log::printfSafe("[HID] Unsupported generic desktop usage: 0x%0.8x\n\r", localState.usage);
+                            if constexpr (Debug::DEBUG_HID_ERRORS) {
+                                Log::printfSafe("[HID] Unsupported generic desktop usage: 0x%0.8x\n\r", localState.usage);
+                            }
+
                             hierarchy.Release();
                             return Optional<HIDHierarchy>();
                         }
                     }
                     else {
-                        Log::printfSafe("[HID] Unsupported usage page: 0x%0.8x\n\r", globalState.usagePage);
+                        if constexpr (Debug::DEBUG_HID_ERRORS) {
+                            Log::printfSafe("[HID] Unsupported usage page: 0x%0.8x\n\r", globalState.usagePage);
+                        }
+
                         hierarchy.Release();
                         return Optional<HIDHierarchy>();
                     }
@@ -433,7 +464,14 @@ namespace Devices::USB::HID {
                 static constexpr uint8_t END_COLLECTION         = 0xC;
 
                 if (device == nullptr) {
-                    Log::printfSafe("[HID] No device available to handle main item - Tag: 0x%0.2hhx, Value: 0x%0.8x\n\r", item.tag, item.value);
+                    if constexpr (Debug::DEBUG_HID_ERRORS) {
+                        Log::printfSafe(
+                            "[HID] No device available to handle main item - Tag: 0x%0.2hhx, Value: 0x%0.8x\n\r",
+                            item.tag,
+                            item.value
+                        );
+                    }
+
                     hierarchy.Release();
                     return Optional<HIDHierarchy>();
                 }
@@ -469,7 +507,10 @@ namespace Devices::USB::HID {
                     }
                     break;
                 case FEATURE:
-                    Log::printfSafe("[HID] Device features not yet supported\n\r");
+                    if constexpr (Debug::DEBUG_HID_ERRORS) {
+                        Log::printfSafe("[HID] Device features not yet supported\n\r");
+                    }
+
                     hierarchy.Release();
                     return Optional<HIDHierarchy>();
                 case COLLECTION: {
@@ -484,7 +525,10 @@ namespace Devices::USB::HID {
                     case 0x05: collectionType = InterfaceDevice::CollectionType::UsageSwitch; break;
                     case 0x06: collectionType = InterfaceDevice::CollectionType::UsageModifier; break;
                     default:
-                        Log::printfSafe("[HID] Unsupported collection type: 0x%0.2hhx\n\r", item.value);
+                        if constexpr (Debug::DEBUG_HID_ERRORS) {
+                            Log::printfSafe("[HID] Unsupported collection type: 0x%0.2hhx\n\r", item.value);
+                        }
+
                         hierarchy.Release();
                         return Optional<HIDHierarchy>();
                     }
@@ -502,7 +546,14 @@ namespace Devices::USB::HID {
                     }
                     break;
                 default:
-                    Log::printfSafe("[HID] Unsupported main item - Tag: 0x%0.2hhx, Value: 0x%0.8x\n\r", item.tag, item.value);
+                    if constexpr (Debug::DEBUG_HID_ERRORS) {
+                        Log::printfSafe(
+                            "[HID] Unsupported main item - Tag: 0x%0.2hhx, Value: 0x%0.8x\n\r",
+                            item.tag,
+                            item.value
+                        );
+                    }
+
                     hierarchy.Release();
                     return Optional<HIDHierarchy>();
                 }
@@ -512,7 +563,10 @@ namespace Devices::USB::HID {
         }
 
         if (hasMultipleDevices && !hasMultipleReports) {
-            Log::printfSafe("[HID] Unsupported single-report multiple-device configuration\n\r");
+            if constexpr (Debug::DEBUG_HID_ERRORS) {
+                Log::printfSafe("[HID] Unsupported single-report multiple-device configuration\n\r");
+            }
+
             hierarchy.Release();
             return Optional<HIDHierarchy>();
         }
@@ -525,7 +579,13 @@ namespace Devices::USB::HID {
 
     Optional<Device*> Device::Create(xHCI::Device& device, uint8_t configuration_value, const FunctionDescriptor* function) {
         if (function->interfacesNumber != 1) {
-            Log::printfSafe("[HID] Does not support functions that do not have exactly one interface (has %u)\n\r", function->interfacesNumber);
+            if constexpr (Debug::DEBUG_HID_ERRORS) {
+                Log::printfSafe(
+                    "[HID] Does not support functions that do not have exactly one interface (has %u)\n\r",
+                    function->interfacesNumber
+                );
+            }
+
             return Optional<Device*>();
         }
 
@@ -542,7 +602,13 @@ namespace Devices::USB::HID {
         uint8_t* buffer = reinterpret_cast<uint8_t*>(IOHeap::Allocate(hid_descriptor.reportDescriptorLength));
 
         if (buffer == nullptr) {
-            Log::printfSafe("[HID] Could not allocate memory for report descriptor (size: %u bytes)\n\r", hid_descriptor.reportDescriptorLength);
+            if constexpr (Debug::DEBUG_HID_ERRORS) {
+                Log::printfSafe(
+                    "[HID] Could not allocate memory for report descriptor (size: %u bytes)\n\r",
+                    hid_descriptor.reportDescriptorLength
+                );
+            }
+
             return Optional<Device*>();
         }
 
@@ -558,7 +624,10 @@ namespace Devices::USB::HID {
             hid_descriptor.reportDescriptorLength,
             buffer
         ).IsSuccess()) {
-            Log::printfSafe("[HID] Failed to fetch report descriptor from device\n\r");
+            if constexpr (Debug::DEBUG_HID_ERRORS) {
+                Log::printfSafe("[HID] Failed to fetch report descriptor from device\n\r");
+            }
+
             IOHeap::Free(buffer);
             return Optional<Device*>();
         }
@@ -570,19 +639,27 @@ namespace Devices::USB::HID {
         auto hierarchy_wrapper = parser.Parse();
 
         if (!hierarchy_wrapper.HasValue()) {
-            Log::printfSafe("[HID] Failed to parse report descriptor\n\r");
+            if constexpr (Debug::DEBUG_HID_ERRORS) {
+                Log::printfSafe("[HID] Failed to parse report descriptor\n\r");
+            }
+
             IOHeap::Free(buffer);
             return Optional<Device*>();
         }
 
-        Log::printfSafe("[HID] Successfully parsed report descriptor\n\r");
+        if constexpr (Debug::DEBUG_HID_INFO) {
+            Log::printfSafe("[HID] Successfully parsed report descriptor\n\r");
+        }
 
         IOHeap::Free(buffer);
 
         auto hierarchy = hierarchy_wrapper.GetValue();
 
         if (!SetConfiguration(device, configuration_value).IsSuccess()) {
-            Log::printfSafe("[HID] Could not set device configuration to %u\n\r", configuration_value);
+            if constexpr (Debug::DEBUG_HID_ERRORS) {
+                Log::printfSafe("[HID] Could not set device configuration to %u\n\r", configuration_value);
+            }
+
             hierarchy.Release();
             return Optional<Device*>();
         }
@@ -594,12 +671,17 @@ namespace Devices::USB::HID {
                 const auto& endpoint = config_interface->endpoints[i];
                 
                 if (!device.ConfigureEndpoint(device, endpoint).IsSuccess()) {
-                    Log::printfSafe("[HID] Could not configure endpoint 0x%0.2hhx\n\r", endpoint.endpointAddress);
+                    if constexpr (Debug::DEBUG_HID_ERRORS) {
+                        Log::printfSafe("[HID] Could not configure endpoint 0x%0.2hhx\n\r", endpoint.endpointAddress);
+                    }
+
                     hierarchy.Release();
                     return Optional<Device*>();
                 }
 
-                Log::printfSafe("[HID] Configured endpoint 0x%0.2hhx\n\r", endpoint.endpointAddress);
+                if constexpr (Debug::DEBUG_HID_INFO) {
+                    Log::printfSafe("[HID] Configured endpoint 0x%0.2hhx\n\r", endpoint.endpointAddress);
+                }
             }
 
             config_interface = config_interface->next;
@@ -609,7 +691,10 @@ namespace Devices::USB::HID {
         uint8_t* reportBuffer = reinterpret_cast<uint8_t*>(IOHeap::Allocate(hierarchy.GetMaxReportSize()));
 
         if (reportBuffer == nullptr) {
-            Log::printfSafe("[HID] Could not allocate memory for report buffer\n\r");
+            if constexpr (Debug::DEBUG_HID_ERRORS) {
+                Log::printfSafe("[HID] Could not allocate memory for report buffer\n\r");
+            }
+
             hierarchy.Release();
             return Optional<Device*>();
         }
@@ -617,7 +702,10 @@ namespace Devices::USB::HID {
         auto* const raw_device = Heap::Allocate(sizeof(Device));
 
         if (raw_device == nullptr) {
-            Log::printfSafe("[HID] Could not allocate memory for HID device\n\r");
+            if constexpr (Debug::DEBUG_HID_ERRORS) {
+                Log::printfSafe("[HID] Could not allocate memory for HID device\n\r");
+            }
+
             hierarchy_wrapper.GetValue().Release();
             return Optional<Device*>();
         }
@@ -643,14 +731,20 @@ namespace Devices::USB::HID {
         }
 
         if (interrupt_in_ep_address == 0) {
-            Log::printfSafe("[HID] Could not find interrupt IN endpoint in interface\n\r");
+            if constexpr (Debug::DEBUG_HID_ERRORS) {
+                Log::printfSafe("[HID] Could not find interrupt IN endpoint in interface\n\r");
+            }
+
             return Failure();
         }
 
         endpoint_ring = xHCI::Device::GetEndpointTransferRing(*this, interrupt_in_ep_address, true);
 
         if (endpoint_ring == nullptr) {
-            Log::printfSafe("[HID] Could not get transfer ring for interrupt IN endpoint 0x%0.2hhx\n\r", interrupt_in_ep_address);
+            if constexpr (Debug::DEBUG_HID_ERRORS) {
+                Log::printfSafe("[HID] Could not get transfer ring for interrupt IN endpoint 0x%0.2hhx\n\r", interrupt_in_ep_address);
+            }
+            
             return Failure();
         }
 
