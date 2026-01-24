@@ -18,6 +18,7 @@
 
 #include <utility>
 
+#include <shared/Debug.hpp>
 #include <shared/LockGuard.hpp>
 #include <shared/Response.hpp>
 
@@ -269,7 +270,10 @@ namespace Devices::USB::xHCI {
         auto result = controller.SendCommand(command_legacy);
 
         if (!result.HasValue() || result.GetValue().GetCompletionCode() != TRB::CompletionCode::Success) {
-            Log::printfSafe("[USB] Legacy addressing failed for device %u, trying non-legacy method\r\n", information.slot_id);
+            if constexpr (Debug::DEBUG_USB_ERRORS) {
+                Log::printfSafe("[USB] Legacy addressing failed for device %u, trying non-legacy method\r\n", information.slot_id);
+            }
+
             result = controller.SendCommand(command);
 
             if (!result.HasValue() || result.GetValue().GetCompletionCode() != TRB::CompletionCode::Success) {
@@ -487,7 +491,10 @@ namespace Devices::USB::xHCI {
         auto& context_wrapper = device.context_wrapper;
 
         if (endpoint.superSpeedConfig.valid) {
-            Log::putsSafe("[USB] SuperSpeed endpoints are not yet supported\n\r");
+            if constexpr (Debug::DEBUG_USB_WARNINGS) {
+                Log::putsSafe("[USB] SuperSpeed endpoints are not yet supported\n\r");
+            }
+
             return Failure();
         }
 
@@ -496,7 +503,10 @@ namespace Devices::USB::xHCI {
         const auto interval = ConvertEndpointInterval(device, endpoint.endpointType, endpoint.interval);
 
         if (!interval.HasValue()) {
-            Log::putsSafe("[USB] Invalid endpoint interval\r\n");
+            if constexpr (Debug::DEBUG_USB_ERRORS) {
+                Log::putsSafe("[USB] Invalid endpoint interval\r\n");
+            }
+
             return Failure();
         }
 
@@ -525,7 +535,10 @@ namespace Devices::USB::xHCI {
             auto transfer_ring_result = TransferRing::Create(1);
 
             if (!transfer_ring_result.HasValue()) {
-                Log::printfSafe("[USB] Failed to create endpoint transfer ring for device %u\r\n", device.information.slot_id);
+                if constexpr (Debug::DEBUG_USB_ERRORS) {
+                    Log::printfSafe("[USB] Failed to create endpoint transfer ring for device %u\r\n", device.information.slot_id);
+                }
+
                 return Failure();
             }
 
@@ -559,7 +572,6 @@ namespace Devices::USB::xHCI {
         const auto result = device.controller.SendCommand(command);
 
         if (!result.HasValue() || result.GetValue().GetCompletionCode() != TRB::CompletionCode::Success) {
-            Log::printfSafe("error: %llu\n\r", result.GetValue().GetCompletionCode());
             transfer_ring->Release();
             Heap::Free(transfer_ring);
             transfer_ring = nullptr;
@@ -710,11 +722,17 @@ namespace Devices::USB::xHCI {
 
             if (!config_result.HasValue()) {
                 configurations[i].valid = false;
-                Log::printfSafe("[USB] Failed to parse configuration descriptor %u for device %u\r\n", i, information.slot_id);
+
+                if constexpr (Debug::DEBUG_USB_SOFT_ERRORS) {
+                    Log::printfSafe("[USB] Failed to parse configuration descriptor %u for device %u\r\n", i, information.slot_id);
+                }
             }
             else {
                 configurations[i] = config_result.GetValue();
-                Log::printfSafe("[USB] Fetched configuration descriptor %u for device %u\r\n", i, information.slot_id);
+
+                if constexpr (Debug::DEBUG_USB_INFO) {
+                    Log::printfSafe("[USB] Fetched configuration descriptor %u for device %u\r\n", i, information.slot_id);
+                }
             }
         }
 
@@ -791,10 +809,14 @@ namespace Devices::USB::xHCI {
                     };
 
                     if (config_descriptor.AddFunction(new_function).HasValue()) {
-                        Log::printfSafe("[USB] Created explicit interface association\r\n");
+                        if constexpr (Debug::DEBUG_USB_INFO) {
+                            Log::printfSafe("[USB] Created explicit interface association\r\n");
+                        }
                     }
                     else {
-                        Log::printfSafe("[USB] Failed to create explicit interface association\r\n");
+                        if constexpr (Debug::DEBUG_USB_SOFT_ERRORS) {
+                            Log::printfSafe("[USB] Failed to create explicit interface association\r\n");
+                        }
                     }
                 }
 
@@ -803,7 +825,10 @@ namespace Devices::USB::xHCI {
             }
 
             if (GetDescriptorSize(ptr) == 0) {
-                Log::putsSafe("[USB] Invalid descriptor with zero length, aborting configuration parsing\r\n");
+                if constexpr (Debug::DEBUG_USB_ERRORS) {
+                    Log::putsSafe("[USB] Invalid descriptor with zero length, aborting configuration parsing\r\n");
+                }
+
                 config_descriptor.Release();
                 IOHeap::Free(data);
                 return Optional<ConfigurationDescriptor>();
@@ -834,13 +859,18 @@ namespace Devices::USB::xHCI {
                     auto result = config_descriptor.AddFunction(new_function);
 
                     if (!result.HasValue()) {
-                        Log::printfSafe("[USB] Failed to create function for interface %u\n\r", interface.descriptor.interfaceNumber);
+                        if constexpr (Debug::DEBUG_USB_SOFT_ERRORS) {
+                            Log::printfSafe("[USB] Failed to create function for interface %u\r\n", interface.descriptor.interfaceNumber);
+                        }
 
                         while (ptr < limit && GetDescriptorType(ptr) != InterfaceDescriptor::DESCRIPTOR_TYPE) {
                             const size_t desc_size = GetDescriptorSize(ptr);
 
                             if (desc_size == 0) {
-                                Log::putsSafe("[USB] Invalid descriptor with zero length, aborting interface parsing\r\n");
+                                if constexpr (Debug::DEBUG_USB_ERRORS) {
+                                    Log::putsSafe("[USB] Invalid descriptor with zero length, aborting interface parsing\r\n");
+                                }
+
                                 config_descriptor.Release();
                                 IOHeap::Free(data);
                                 return Optional<ConfigurationDescriptor>();
@@ -860,32 +890,51 @@ namespace Devices::USB::xHCI {
 
                 if (function_interface != nullptr) {
                     if (function_interface->AddAlternate(raw_interface).IsSuccess()) {
-                        Log::printfSafe(
-                            "[USB] Parsed interface %u.%u\r\n",
-                            raw_interface.interfaceNumber,
-                            raw_interface.alternateSetting
-                        );
+                        if constexpr (Debug::DEBUG_USB_INFO) {
+                            Log::printfSafe(
+                                "[USB] Parsed interface %u.%u\r\n",
+                                raw_interface.interfaceNumber,
+                                raw_interface.alternateSetting
+                            );
+                        }
                     }                    
                     else {
-                        Log::printfSafe(
-                            "[USB] Failed to add alternate interface %u.%u\r\n",
-                            raw_interface.interfaceNumber,
-                            raw_interface.alternateSetting
-                        );
+                        if constexpr (Debug::DEBUG_USB_SOFT_ERRORS) {
+                            Log::printfSafe(
+                                "[USB] Failed to add alternate interface %u.%u\r\n",
+                                raw_interface.interfaceNumber,
+                                raw_interface.alternateSetting
+                            );
+                        }
                     }
                 }
                 else {
                     if (function->AddInterface(raw_interface).IsSuccess()) {
-                        Log::printfSafe("[USB] Parsed interface %u.%u\r\n", raw_interface.interfaceNumber, raw_interface.alternateSetting);
+                        if constexpr (Debug::DEBUG_USB_INFO) {
+                            Log::printfSafe(
+                                "[USB] Parsed interface %u.%u\r\n",
+                                raw_interface.interfaceNumber,
+                                raw_interface.alternateSetting
+                            );
+                        }
+
                         found_valid_interface = true;
                     }
                     else {
-                        Log::printfSafe("[USB] Failed to add interface %u.%u\r\n", raw_interface.interfaceNumber, raw_interface.alternateSetting);
+                        if constexpr (Debug::DEBUG_USB_SOFT_ERRORS) {
+                            Log::printfSafe(
+                                "[USB] Failed to add interface %u.%u\r\n",
+                                raw_interface.interfaceNumber,
+                                raw_interface.alternateSetting
+                            );
+                        }
                     }
                 }
             }
             else {
-                Log::printfSafe("[USB] Failed to parse interface descriptor in configuration %u\r\n", index);
+                if constexpr (Debug::DEBUG_USB_SOFT_ERRORS) {
+                    Log::printfSafe("[USB] Failed to parse interface descriptor in configuration %u\r\n", index);
+                }
             }
         }
 
@@ -945,7 +994,10 @@ namespace Devices::USB::xHCI {
                     const size_t desc_size = GetDescriptorSize(data);
                     
                     if (desc_size == 0) {
-                        Log::printfSafe("[USB] Invalid descriptor with zero length, aborting interface parsing\r\n");
+                        if constexpr (Debug::DEBUG_USB_ERRORS) {
+                            Log::printfSafe("[USB] Invalid descriptor with zero length, aborting interface parsing\r\n");
+                        }
+
                         interface_descriptor.Release();
                         return Optional<InterfaceWrapper>();
                     }
@@ -957,12 +1009,14 @@ namespace Devices::USB::xHCI {
 
                         interface_descriptor.AddExtra(extra);
 
-                        Log::printfSafe(
-                            "[USB] Parsed extra descriptor (type 0x%0.2hhx) for interface %u.%u\r\n",
-                            extra->descriptorType,
-                            interface_descriptor.interfaceNumber,
-                            interface_descriptor.alternateSetting
-                        );
+                        if constexpr (Debug::DEBUG_USB_INFO) {
+                            Log::printfSafe(
+                                "[USB] Parsed extra descriptor (type 0x%0.2hhx) for interface %u.%u\r\n",
+                                extra->descriptorType,
+                                interface_descriptor.interfaceNumber,
+                                interface_descriptor.alternateSetting
+                            );
+                        }
                     }
                 }
                 
@@ -970,21 +1024,27 @@ namespace Devices::USB::xHCI {
 
                 if (endpoint_wrapper.HasValue()) {
                     interface_descriptor.endpoints[descriptor_index] = endpoint_wrapper.GetValue();
-                    Log::printfSafe(
-                        "[USB] Parsed endpoint %u of interface %u.%u\r\n",
-                        interface_descriptor.endpoints[descriptor_index].endpointAddress,
-                        interface_descriptor.interfaceNumber,
-                        interface_descriptor.alternateSetting
-                    );
+
+                    if constexpr (Debug::DEBUG_USB_INFO) {
+                        Log::printfSafe(
+                            "[USB] Parsed endpoint %u of interface %u.%u\r\n",
+                            interface_descriptor.endpoints[descriptor_index].endpointAddress,
+                            interface_descriptor.interfaceNumber,
+                            interface_descriptor.alternateSetting
+                        );
+                    }
                 }
                 else {
                     // If we can't parse an interface endpoint, fail on this interface
-                    Log::printfSafe(
-                        "[USB] Failed to parse endpoint %u of interface %u.%u\r\n",
-                        descriptor_index,
-                        interface_descriptor.interfaceNumber,
-                        interface_descriptor.alternateSetting
-                    );
+                    if constexpr (Debug::DEBUG_USB_ERRORS) {
+                        Log::printfSafe(
+                            "[USB] Failed to parse endpoint %u of interface %u.%u\r\n",
+                            descriptor_index,
+                            interface_descriptor.interfaceNumber,
+                            interface_descriptor.alternateSetting
+                        );
+                    }
+
                     interface_descriptor.Release();
                     return Optional<InterfaceWrapper>();
                 }
@@ -1001,7 +1061,10 @@ namespace Devices::USB::xHCI {
 
     Optional<Device::EndpointDescriptor> Device::ParseEndpointDescriptor(const uint8_t*& data, const uint8_t* limit) {
         if (!CheckDescriptor<EndpointDescriptor>(data).IsSuccess() || data + EndpointDescriptor::DESCRIPTOR_SIZE > limit) {
-            Log::printfSafe("%u : %u\n\r", GetDescriptorSize(data), GetDescriptorType(data));
+            if constexpr (Debug::DEBUG_USB_ERRORS) {
+                Log::printfSafe("%u : %u\n\r", GetDescriptorSize(data), GetDescriptorType(data));
+            }
+
             data += GetDescriptorSize(data);
             return Optional<EndpointDescriptor>();
         }
@@ -1245,44 +1308,56 @@ namespace Devices::USB::xHCI {
     }
 
     Optional<Device*> Device::Initialize() {
-        Log::printfSafe("[USB] Initializing device %u\r\n", information.slot_id);
+        if constexpr (Debug::DEBUG_USB_INFO) {
+            Log::printfSafe("[USB] Initializing device %u\r\n", information.slot_id);
+        }
         
         // Initialize contexts
-        auto context_wrapper_result = ContextWrapper::Create(controller.HasExtendedContext());
+        const auto context_wrapper_result = ContextWrapper::Create(controller.HasExtendedContext());
 
         if (!context_wrapper_result.HasValue()) {
-            Log::printfSafe("[USB] Failed to create context wrapper for device %u\r\n", information.slot_id);
+            if constexpr (Debug::DEBUG_USB_ERRORS) {
+                Log::printfSafe("[USB] Failed to create context wrapper for device %u\r\n", information.slot_id);
+            }
+
             return Optional<Device*>();
         }
 
         context_wrapper = context_wrapper_result.GetValue();
         context_wrapper->Reset();
 
-        auto* input_control_context = context_wrapper->GetInputControlContext();
+        auto* const input_control_context = context_wrapper->GetInputControlContext();
         input_control_context->SetAddContext(0);
         input_control_context->SetAddContext(1);
 
-        auto* input_slot_context = context_wrapper->GetSlotContext(true);
+        auto* const input_slot_context = context_wrapper->GetSlotContext(true);
         input_slot_context->SetRootHubPort(information.root_hub_port);
         input_slot_context->SetRouteString(information.route_string);
         input_slot_context->SetContextEntries(1);
 
         // Initialize transfer ring for control endpoint
-        auto transfer_ring_result = TransferRing::Create(1);
+        const auto transfer_ring_result = TransferRing::Create(1);
         if (!transfer_ring_result.HasValue()) {
-            Log::printfSafe("[USB] Failed to create control transfer ring for device %u\r\n", information.slot_id);
+            if constexpr (Debug::DEBUG_USB_ERRORS) {
+                Log::printfSafe("[USB] Failed to create control transfer ring for device %u\r\n", information.slot_id);
+            }
+
             Release();
             return Optional<Device*>();
         }
 
         control_transfer_ring = transfer_ring_result.GetValue();
 
-        auto* control_endpoint_context = context_wrapper->GetControlEndpointContext(true);
+        auto* const control_endpoint_context = context_wrapper->GetControlEndpointContext(true);
 
         // Compute default control endpoint max packet size
-        auto max_packet_size = GetDefaultMaxPacketSize();
+        const auto max_packet_size = GetDefaultMaxPacketSize();
+
         if (!max_packet_size.HasValue()) {
-            Log::printfSafe("[USB] Failed to determine default max packet size for device %u\r\n", information.slot_id);
+            if constexpr (Debug::DEBUG_USB_ERRORS) {
+                Log::printfSafe("[USB] Failed to get default max packet size for device %u\r\n", information.slot_id);
+            }
+            
             Release();
             return Optional<Device*>();
         }
@@ -1298,65 +1373,79 @@ namespace Devices::USB::xHCI {
         control_endpoint_context->SetErrorCount(3);
 
         if (!AddressDevice().IsSuccess()) {
-            Log::printfSafe("[USB] Addressing failed for device %u\r\n", information.slot_id);
+            if constexpr (Debug::DEBUG_USB_ERRORS) {
+                Log::printfSafe("[USB] Addressing failed for device %u\r\n", information.slot_id);
+            }
+
             Release();
             return Optional<Device*>();
         }
 
-        Log::printfSafe("[USB] Device %u successfully addressed\r\n", information.slot_id);
+        if constexpr (Debug::DEBUG_USB_INFO) {
+            Log::printfSafe("[USB] Device %u successfully addressed\r\n", information.slot_id);
+        }
 
         // Get device descriptor
         if (!FetchDeviceDescriptor().IsSuccess()) {
-            Log::printfSafe("[USB] Failed to fetch device descriptor for device %u\n\r", information.slot_id);
+            if constexpr (Debug::DEBUG_USB_ERRORS) {
+                Log::printfSafe("[USB] Failed to fetch device descriptor for device %u\r\n", information.slot_id);
+            }
+            
             Release();
             return Optional<Device*>();
         }
 
-        Log::printfSafe("[USB] Fetched device descriptor for device %u\n\r", information.slot_id);
+        if constexpr (Debug::DEBUG_USB_INFO) {
+            Log::printfSafe("[USB] Fetched device descriptor for device %u\n\r", information.slot_id);
+        }
 
         if (!FetchConfigurations().IsSuccess()) {
-            Log::printfSafe("[USB] Failed to fetch configurations for device %u\n\r", information.slot_id);
+            if constexpr (Debug::DEBUG_USB_ERRORS) {
+                Log::printfSafe("[USB] Failed to fetch configurations for device %u\r\n", information.slot_id);
+            }
+            
             Release();
             return Optional<Device*>();
         }
 
-        Log::printfSafe("[USB] Fetched configurations for device %u\n\r", information.slot_id);
+        if constexpr (Debug::DEBUG_USB_INFO) {
+            Log::printfSafe("[USB] Fetched configurations for device %u\n\r", information.slot_id);
+            Log::printfSafe("[USB] Enumerating configuration topology...\n\r");
 
-        Log::printfSafe("[USB] Enumerating configuration topology...\n\r");
+            if (descriptor.manufacturerDescriptorIndex != 0) {
+                auto manufacturer_string_wrapper = GetString(descriptor.manufacturerDescriptorIndex, 0x0409);
 
-        if (descriptor.manufacturerDescriptorIndex != 0) {
-            auto manufacturer_string_wrapper = GetString(descriptor.manufacturerDescriptorIndex, 0x0409);
-
-            if (manufacturer_string_wrapper.HasValue()) {
-                Log::printfSafe("[USB] Manufacturer String: %s\r\n", manufacturer_string_wrapper.GetValue());
-                Heap::Free(manufacturer_string_wrapper.GetValue());
+                if (manufacturer_string_wrapper.HasValue()) {
+                    Log::printfSafe("[USB] Manufacturer String: %s\r\n", manufacturer_string_wrapper.GetValue());
+                    Heap::Free(manufacturer_string_wrapper.GetValue());
+                }
+                else {
+                    Log::printfSafe("[USB] Failed to get manufacturer string\r\n");
+                }
             }
-            else {
-                Log::printfSafe("[USB] Failed to get manufacturer string\r\n");
-            }
-        }
 
-        if (descriptor.productDescriptorIndex != 0) {
-            auto product_string_wrapper = GetString(descriptor.productDescriptorIndex, 0x0409);
+            if (descriptor.productDescriptorIndex != 0) {
+                auto product_string_wrapper = GetString(descriptor.productDescriptorIndex, 0x0409);
 
-            if (product_string_wrapper.HasValue()) {
-                Log::printfSafe("[USB] Product String: %s\r\n", product_string_wrapper.GetValue());
-                Heap::Free(product_string_wrapper.GetValue());
+                if (product_string_wrapper.HasValue()) {
+                    Log::printfSafe("[USB] Product String: %s\r\n", product_string_wrapper.GetValue());
+                    Heap::Free(product_string_wrapper.GetValue());
+                }
+                else {
+                    Log::printfSafe("[USB] Failed to get product string\r\n");
+                }
             }
-            else {
-                Log::printfSafe("[USB] Failed to get product string\r\n");
-            }
-        }
 
-        if (descriptor.serialNumberDescriptorIndex != 0) {
-            auto serial_string_wrapper = GetString(descriptor.serialNumberDescriptorIndex, 0x0409);
+            if (descriptor.serialNumberDescriptorIndex != 0) {
+                auto serial_string_wrapper = GetString(descriptor.serialNumberDescriptorIndex, 0x0409);
 
-            if (serial_string_wrapper.HasValue()) {
-                Log::printfSafe("[USB] Serial Number String: %s\r\n", serial_string_wrapper.GetValue());
-                Heap::Free(serial_string_wrapper.GetValue());
-            }
-            else {  
-                Log::printfSafe("[USB] Failed to get serial number string\r\n");
+                if (serial_string_wrapper.HasValue()) {
+                    Log::printfSafe("[USB] Serial Number String: %s\r\n", serial_string_wrapper.GetValue());
+                    Heap::Free(serial_string_wrapper.GetValue());
+                }
+                else {  
+                    Log::printfSafe("[USB] Failed to get serial number string\r\n");
+                }
             }
         }
 
@@ -1365,23 +1454,32 @@ namespace Devices::USB::xHCI {
             if (configurations[i].valid) {
                 for (FunctionDescriptor* function = configurations[i].functions; function != nullptr; function = function->next) {
                     if (function->functionClass == HID::Device::GetClassCode()) {
-                        Log::printfSafe("[USB] Found HID function in configuration %u\r\n", i);
+                        if constexpr (Debug::DEBUG_USB_INFO) {
+                            Log::printfSafe("[USB] Found HID function in configuration %u\r\n", i);
+                        }
 
                         auto dev = HID::Device::Create(*this, configurations[i].configurationValue, function);
 
                         if (dev.HasValue()) {
-                            Log::printfSafe("[USB] HID device created for device %u\r\n", information.slot_id);
+                            if constexpr (Debug::DEBUG_USB_INFO) {
+                                Log::printfSafe("[USB] HID device created for device %u\r\n", information.slot_id);
+                            }
+
                             return Optional<Device*>(dev.GetValue());
                         }
                         else {
-                            Log::printfSafe("[USB] Failed to create HID device for device %u\r\n", information.slot_id);
+                            if constexpr (Debug::DEBUG_USB_SOFT_ERRORS) {
+                                Log::printfSafe("[USB] Failed to initialize HID device for device %u\r\n", information.slot_id);
+                            }
                         }
                     }
                 }
             }
         }
 
-        Log::printfSafe("[USB] No suitable functions found for device %u\r\n", information.slot_id);
+        if constexpr (Debug::DEBUG_USB_INFO) {
+            Log::printfSafe("[USB] No suitable functions found for device %u\r\n", information.slot_id);
+        }
 
         Device* ptr = reinterpret_cast<Device*>(Heap::Allocate(sizeof(Device)));
 
