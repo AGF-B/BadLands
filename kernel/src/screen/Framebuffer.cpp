@@ -86,6 +86,7 @@ namespace Framebuffer {
             uint32_t* src_row = &back[((screen_y + y_disp) % info.YResolution) * info.PixelsPerScanLine + x];
             uint32_t bytes_to_copy = width * sizeof(uint32_t);
 
+            __asm__ volatile("cld");
             __asm__ volatile(
                 "rep movsb"
                 : "=D"(dest_row), "=S"(src_row), "=c"(bytes_to_copy)
@@ -101,10 +102,39 @@ namespace Framebuffer {
             uint32_t* src_row  = &back[((y + y_disp) % info.YResolution) * info.PixelsPerScanLine];
             uint64_t bytes_to_copy = info.XResolution / 2;
 
+            __asm__ volatile("cld");
             __asm__ volatile(
                 "rep movsq"
                 : "=D"(dest_row), "=S"(src_row), "=c"(bytes_to_copy)
                 : "0"(dest_row), "1"(src_row), "2"(bytes_to_copy)
+                : "memory"
+            );
+        }
+    }
+
+    void Clear() {
+        for (size_t y = 0; y < info.YResolution; ++y) {
+            uint32_t* hw_buffer_row = &address[y * info.PixelsPerScanLine];
+            uint32_t* back_buffer_row = &back[y * info.PixelsPerScanLine];
+
+            const uint64_t pixels_to_clear = info.XResolution / 2;
+            uint64_t count = pixels_to_clear;
+
+            __asm__ volatile("cld");
+            
+            __asm__ volatile(
+                "rep stosq"
+                : "=D"(hw_buffer_row), "=c"(count)
+                : "a"(0), "0"(hw_buffer_row), "1"(count)
+                : "memory"
+            );
+
+            count = pixels_to_clear;
+
+            __asm__ volatile(
+                "rep stosq"
+                : "=D"(back_buffer_row), "=c"(count)
+                : "a"(0), "0"(back_buffer_row), "1"(count)
                 : "memory"
             );
         }

@@ -181,13 +181,7 @@ namespace Log {
 	}
 
 	void clear() {
-		for (size_t y = 0; y < screenInfo.height; ++y) {
-			for (size_t x = 0; x < screenInfo.width; ++x) {
-				Framebuffer::Write(x, y, screenContext.background);
-			}
-		}
-		Framebuffer::Flush();
-
+		Framebuffer::Clear();
 		screenContext.x = 0;
 		screenContext.y = 0;
 		screenContext.currentColumn = 0;

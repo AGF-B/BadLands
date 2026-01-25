@@ -34,5 +34,6 @@ namespace Framebuffer {
     void Write(uint32_t x, uint32_t y, uint32_t p);
     void FlushRect(uint32_t x, uint32_t y, uint32_t width, uint32_t height);
     void Flush();
+    void Clear();
     void Scroll(uint64_t dy);
 }
