@@ -5,3 +5,4 @@ simulation/disk.img
 simulation/qemu.log
 simulation/*.fd
 CMakeSettings.json
+.DS_Store
