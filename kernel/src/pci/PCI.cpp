@@ -1,3 +1,17 @@
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Copyright (C) 2026 Alexandre Boissiere
+// This file is part of the BadLands operating system.
+//
+// This program is free software: you can redistribute it and/or modify it under the terms of the
+// GNU General Public License as published by the Free Software Foundation, version 3.
+// This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+// without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+// See the GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License along with this program.
+// If not, see <https://www.gnu.org/licenses/>. 
+
 #include <cstdint>
 
 #include <shared/memory/defs.hpp>
@@ -135,7 +149,7 @@ namespace PCI {
                 if (device_ecam->VendorID != 0xFFFF) {
                     if (device_ecam->BaseClassCode == 12 && device_ecam->SubclassCode == 3) {
                         if (device_ecam->ProgrammingInterface == 0x30) {
-                            Log::printfSafe("Found USB xHCI controller at bus=%u,device=%u\n\r", bus, device);
+                            Log::printfSafe("[PCIE] Found USB xHCI controller at bus=%u,device=%u\n\r", bus, device);
 
                             auto* ptr = Devices::USB::xHCI::Controller::Initialize(
                                 bus,
@@ -145,38 +159,38 @@ namespace PCI {
                             );
 
                             if (ptr == nullptr) {
-                                Log::putsSafe("USB xHCI controller initialization failed\n\r");
+                                Log::putsSafe("[PCIE] USB xHCI controller initialization failed\n\r");
                             }
                         }
                     }
-                }
 
-                if ((device_ecam->HeaderType & 0x80) != 0) {
-                    for (size_t function = 0; function < 8; ++function) {
-                        PCI_CS* phys_function_ecam = reinterpret_cast<PCI_CS*>(
-                            ECAM_CS + ((bus) << 20 | (device) << 15 | (function) << 12)
-                        );
-                        PCI_CS* function_ecam = reinterpret_cast<PCI_CS*>(
-                            VirtualMemory::MapGeneralPages(phys_function_ecam, 1, flags)
-                        );
-
-                        if (function_ecam == nullptr) {
-                            Panic::PanicShutdown("COULD NOT RESERVE PAGE FOR FUNCTION ECAM\n\r");
-                        }
-
-                        if (function_ecam->VendorID != 0xFFFF) {
-                            Log::printfSafe(
-                                "\tFunction found (class=%u,subclass=%u,pi=%u,bus=%u,device=%u,function=%u)\n\r",
-                                function_ecam->BaseClassCode,
-                                function_ecam->SubclassCode,
-                                function_ecam->ProgrammingInterface,
-                                bus,
-                                device,
-                                function
+                    if ((device_ecam->HeaderType & 0x80) != 0) {
+                        for (size_t function = 1; function < 8; ++function) {
+                            PCI_CS* phys_function_ecam = reinterpret_cast<PCI_CS*>(
+                                ECAM_CS + ((bus) << 20 | (device) << 15 | (function) << 12)
                             );
-                        }
+                            PCI_CS* function_ecam = reinterpret_cast<PCI_CS*>(
+                                VirtualMemory::MapGeneralPages(phys_function_ecam, 1, flags)
+                            );
 
-                        VirtualMemory::UnmapGeneralPages(function_ecam, 1);
+                            if (function_ecam == nullptr) {
+                                Panic::PanicShutdown("COULD NOT RESERVE PAGE FOR FUNCTION ECAM\n\r");
+                            }
+
+                            if (function_ecam->VendorID != 0xFFFF) {
+                                Log::printfSafe(
+                                    "[PCIE] Function found (class=%u,subclass=%u,pi=%u,bus=%u,device=%u,function=%u)\n\r",
+                                    function_ecam->BaseClassCode,
+                                    function_ecam->SubclassCode,
+                                    function_ecam->ProgrammingInterface,
+                                    bus,
+                                    device,
+                                    function
+                                );
+                            }
+
+                            VirtualMemory::UnmapGeneralPages(function_ecam, 1);
+                        }
                     }
                 }
 

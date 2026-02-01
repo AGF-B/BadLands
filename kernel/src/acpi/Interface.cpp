@@ -1,3 +1,17 @@
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Copyright (C) 2026 Alexandre Boissiere
+// This file is part of the BadLands operating system.
+//
+// This program is free software: you can redistribute it and/or modify it under the terms of the
+// GNU General Public License as published by the Free Software Foundation, version 3.
+// This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+// without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+// See the GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License along with this program.
+// If not, see <https://www.gnu.org/licenses/>. 
+
 #include <cstddef>
 #include <cstdint>
 
@@ -48,7 +62,7 @@ namespace ACPI {
 
         void* physical_xsdt = reinterpret_cast<void*>(rsdp->XsdtAddress);
 
-        if (VirtualMemory::UnmapGeneralPages(rsdp, 1) != VirtualMemory::StatusCode::SUCCESS) {
+        if (!VirtualMemory::UnmapGeneralPages(rsdp, 1).IsSuccess()) {
             Panic::PanicShutdown("ACPI (COULD NOT UNMAP RSDP)\n\r");
         }
 
@@ -63,7 +77,7 @@ namespace ACPI {
 
         size_t xsdt_pages = required_pages(physical_xsdt, xsdt->hdr.Length);
 
-        if (VirtualMemory::UnmapGeneralPages(xsdt, 1) != VirtualMemory::StatusCode::SUCCESS) {
+        if (!VirtualMemory::UnmapGeneralPages(xsdt, 1).IsSuccess()) {
             Panic::PanicShutdown("ACPI (COULD NOT UNMAP FIRST XSDT)\n\r");
         }
 
@@ -112,18 +126,18 @@ namespace ACPI {
 
         size_t pages = required_pages(mapped, mapped->Length);
 
-        if (VirtualMemory::UnmapGeneralPages(mapped, 1) != VirtualMemory::StatusCode::SUCCESS) {
+        if (!VirtualMemory::UnmapGeneralPages(mapped, 1).IsSuccess()) {
             return nullptr;
         }
 
         return VirtualMemory::MapGeneralPages(physical_address, pages);
     }
 
-    bool UnmapTable(void* address) {
+    Success UnmapTable(void* address) {
         Header* mapped = static_cast<Header*>(address);
 
         size_t pages = required_pages(address, mapped->Length);
 
-        return VirtualMemory::UnmapGeneralPages(address, pages) == VirtualMemory::StatusCode::SUCCESS;
+        return VirtualMemory::UnmapGeneralPages(address, pages);
     }
 }

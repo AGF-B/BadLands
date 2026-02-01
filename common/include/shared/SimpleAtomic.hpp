@@ -1,3 +1,17 @@
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Copyright (C) 2026 Alexandre Boissiere
+// This file is part of the BadLands operating system.
+//
+// This program is free software: you can redistribute it and/or modify it under the terms of the
+// GNU General Public License as published by the Free Software Foundation, version 3.
+// This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+// without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+// See the GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License along with this program.
+// If not, see <https://www.gnu.org/licenses/>. 
+
 #pragma once
 
 #include <type_traits>
@@ -175,6 +189,68 @@ namespace Utils {
                 return static_cast<T>(__blatomic_add_fetch_8(
                     reinterpret_cast<volatile uint64_t*>(&atomic_value),
                     1,
+                    Order
+                ));
+            }
+        }
+
+        inline constexpr operator+=(const T& addend) {
+            if constexpr (sizeof(T) == 1) {
+                return static_cast<T>(__blatomic_add_fetch_1(
+                    reinterpret_cast<volatile uint8_t*>(&atomic_value),
+                    addend,
+                    Order
+                ));
+            }
+            else if constexpr (sizeof(T) == 2) {
+                return static_cast<T>(__blatomic_add_fetch_2(
+                    reinterpret_cast<volatile uint16_t*>(&atomic_value),
+                    addend,
+                    Order
+                ));
+            }
+            else if constexpr (sizeof(T) == 4) {
+                return static_cast<T>(__blatomic_add_fetch_4(
+                    reinterpret_cast<volatile uint32_t*>(&atomic_value),
+                    addend,
+                    Order
+                ));
+            }
+            else if constexpr (sizeof(T) == 8) {
+                return static_cast<T>(__blatomic_add_fetch_8(
+                    reinterpret_cast<volatile uint64_t*>(&atomic_value),
+                    addend,
+                    Order
+                ));
+            }
+        }
+
+        inline constexpr operator-=(const T& subtrahend) {
+            if constexpr (sizeof(T) == 1) {
+                return static_cast<T>(__blatomic_sub_fetch_1(
+                    reinterpret_cast<volatile uint8_t*>(&atomic_value),
+                    subtrahend,
+                    Order
+                ));
+            }
+            else if constexpr (sizeof(T) == 2) {
+                return static_cast<T>(__blatomic_sub_fetch_2(
+                    reinterpret_cast<volatile uint16_t*>(&atomic_value),
+                    subtrahend,
+                    Order
+                ));
+            }
+            else if constexpr (sizeof(T) == 4) {
+                return static_cast<T>(__blatomic_sub_fetch_4(
+                    reinterpret_cast<volatile uint32_t*>(&atomic_value),
+                    subtrahend,
+                    Order
+                ));
+            }
+            else if constexpr (sizeof(T) == 8) {
+                return static_cast<T>(__blatomic_sub_fetch_8(
+                    reinterpret_cast<volatile uint64_t*>(&atomic_value),
+                    subtrahend,
                     Order
                 ));
             }

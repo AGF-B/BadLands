@@ -1,16 +1,25 @@
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Copyright (C) 2026 Alexandre Boissiere
+// This file is part of the BadLands operating system.
+//
+// This program is free software: you can redistribute it and/or modify it under the terms of the
+// GNU General Public License as published by the Free Software Foundation, version 3.
+// This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+// without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+// See the GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License along with this program.
+// If not, see <https://www.gnu.org/licenses/>. 
+
 #pragma once
 
+#include <shared/Response.hpp>
 #include <shared/memory/defs.hpp>
 
 #include <mm/VirtualMemoryLayout.hpp>
 
 namespace VirtualMemory {
-    enum class StatusCode {
-		SUCCESS,
-		OUT_OF_MEMORY,
-		INVALID_PARAMETER,
-		INTERNAL_ERROR
-	};
 	/// Paging constants
 
 	// Custom values (when the page is present and valid)
@@ -34,20 +43,20 @@ namespace VirtualMemory {
 	// Index of the page in the swap file, this field is ignored if NP_ON_DEMAND is set
 	inline constexpr uint64_t NP_INDEX		= 0xFFFFFFFFFFFFE000;
 
-	StatusCode Setup();
+	Success Setup();
 	void* DeriveNewFreshCR3();
 
 	void* AllocateDMA(uint64_t pages);
-	void* AllocateKernelHeap(uint64_t pages, bool contiguous = false, bool huge = false);
+	void* AllocateKernelHeap(uint64_t pages);
 	void* AllocateUserPages(uint64_t pages);
 	void* AllocateUserPagesAt(uint64_t pages, void* ptr);
 
-	StatusCode FreeDMA(void* ptr, uint64_t pages);
-	StatusCode FreeKernelHeap(void* ptr, uint64_t pages);
-	StatusCode FreeUserPages(void* ptr, uint64_t pages);
+	Success FreeDMA(void* ptr, uint64_t pages);
+	Success FreeKernelHeap(void* ptr, uint64_t pages);
+	Success FreeUserPages(void* ptr, uint64_t pages);
 
-	StatusCode ChangeMappingFlags(void* _ptr, uint64_t flags, uint64_t pages = 1, bool huge = false);
+	Success ChangeMappingFlags(void* _ptr, uint64_t flags, uint64_t pages = 1);
 
 	void* MapGeneralPages(void* pageAddress, size_t pages, uint64_t flags = 0);
-	StatusCode UnmapGeneralPages(void* vpage, size_t pages);
+	Success UnmapGeneralPages(void* vpage, size_t pages);
 }

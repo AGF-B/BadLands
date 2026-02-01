@@ -1,3 +1,17 @@
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Copyright (C) 2026 Alexandre Boissiere
+// This file is part of the BadLands operating system.
+//
+// This program is free software: you can redistribute it and/or modify it under the terms of the
+// GNU General Public License as published by the Free Software Foundation, version 3.
+// This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+// without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+// See the GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License along with this program.
+// If not, see <https://www.gnu.org/licenses/>. 
+
 #include <cstdint>
 
 #include <devices/KeyboardDispatcher/Keypacket.hpp>
@@ -375,7 +389,7 @@ namespace {
 }
 
 namespace Devices::PS2 {
-    static constexpr uint8_t KEY_PRESSED = Devices::KeyboardDispatcher::FLAG_KEY_PRESSED;
+    static constexpr uint16_t KEY_PRESSED = Devices::KeyboardDispatcher::FLAG_KEY_PRESSED;
 
     EventResponse KeyboardScanCodeSet1Handler(uint8_t byte, BasicKeyPacket* buffer) {
         static enum class state_t {
@@ -404,7 +418,7 @@ namespace Devices::PS2 {
                 BasicKeyPacket packet = {
                     .scancode = byte,
                     .keypoint = scan_code_set_1_keypoints[byte],
-                    .flags = static_cast<uint8_t>(byte & 0x80 ? 0 : KEY_PRESSED)
+                    .flags = static_cast<uint16_t>(byte & 0x80 ? 0 : KEY_PRESSED)
                 };
                 *buffer = packet;
                 return EventResponse::PACKET_CREATED;
@@ -426,7 +440,7 @@ namespace Devices::PS2 {
                 BasicKeyPacket packet = {
                     .scancode = byte,
                     .keypoint = ext_1_scan_code_set_1_keypoints[byte],
-                    .flags = static_cast<uint8_t>(byte & 0x80 ? 0 : KEY_PRESSED)
+                    .flags = static_cast<uint16_t>(byte & 0x80 ? 0 : KEY_PRESSED)
                 };
                 *buffer = packet;
                 return EventResponse::PACKET_CREATED;
@@ -439,7 +453,7 @@ namespace Devices::PS2 {
                     BasicKeyPacket packet = {
                         .scancode = byte,
                         .keypoint = ext_2_scan_code_set_1_keypoint,
-                        .flags = static_cast<uint8_t>(KEY_PRESSED)
+                        .flags = KEY_PRESSED
                     };
                     *buffer = packet;
                     return EventResponse::PACKET_CREATED;
@@ -463,7 +477,7 @@ namespace Devices::PS2 {
                     BasicKeyPacket packet = {
                         .scancode = byte,
                         .keypoint = ext_2_scan_code_set_1_keypoint,
-                        .flags = static_cast<uint8_t>(0)
+                        .flags = 0
                     };
                     *buffer = packet;
                     return EventResponse::PACKET_CREATED;
@@ -487,7 +501,7 @@ namespace Devices::PS2 {
                     BasicKeyPacket packet = {
                         .scancode = byte,
                         .keypoint = ext_3_scan_code_set_1_keypoint,
-                        .flags = static_cast<uint8_t>(KEY_PRESSED)
+                        .flags = KEY_PRESSED
                     };
                     *buffer = packet;
                     return EventResponse::PACKET_CREATED;
@@ -541,7 +555,7 @@ namespace Devices::PS2 {
                 BasicKeyPacket packet = {
                     .scancode = byte,
                     .keypoint = scan_code_set_2_keypoints[byte % 0x84],
-                    .flags = static_cast<uint8_t>(onRelease ? 0 : KEY_PRESSED)
+                    .flags = static_cast<uint16_t>(onRelease ? 0 : KEY_PRESSED)
                 };
                 onRelease = 0;
                 *buffer = packet;
@@ -569,7 +583,7 @@ namespace Devices::PS2 {
                 BasicKeyPacket packet = {
                     .scancode = byte,
                     .keypoint = ext_1_scan_code_set_2_keypoints[byte],
-                    .flags = static_cast<uint8_t>(onRelease ? 0 : KEY_PRESSED)
+                    .flags = static_cast<uint16_t>(onRelease ? 0 : KEY_PRESSED)
                 };
                 onRelease = 0;
                 *buffer = packet;
@@ -583,7 +597,7 @@ namespace Devices::PS2 {
                     BasicKeyPacket packet = {
                         .scancode = byte,
                         .keypoint = ext_2_scan_code_set_2_keypoint,
-                        .flags = static_cast<uint8_t>(KEY_PRESSED)
+                        .flags = KEY_PRESSED
                     };
                     *buffer = packet;
                     return EventResponse::PACKET_CREATED;
@@ -609,7 +623,7 @@ namespace Devices::PS2 {
                     BasicKeyPacket packet = {
                         .scancode = byte,
                         .keypoint = ext_2_scan_code_set_2_keypoint,
-                        .flags = static_cast<uint8_t>(0)
+                        .flags = 0
                     };
                     *buffer = packet;
                     return EventResponse::PACKET_CREATED;
@@ -634,7 +648,7 @@ namespace Devices::PS2 {
                     BasicKeyPacket packet = {
                         .scancode = byte,
                         .keypoint = ext_3_scan_code_set_2_keypoint,
-                        .flags = static_cast<uint8_t>(KEY_PRESSED)
+                        .flags = KEY_PRESSED
                     };
                     *buffer = packet;
                     return EventResponse::PACKET_CREATED;
@@ -669,7 +683,7 @@ namespace Devices::PS2 {
         BasicKeyPacket packet = {
             .scancode = byte,
             .keypoint = scan_code_set_3_keypoints[byte],
-            .flags = static_cast<uint8_t>(state == state_t::RELEASE ? 0 : KEY_PRESSED)
+            .flags = static_cast<uint16_t>(state == state_t::RELEASE ? 0 : KEY_PRESSED)
         };
         state = state_t::DEFAULT;
         *buffer = packet;

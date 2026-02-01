@@ -1,6 +1,21 @@
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Copyright (C) 2026 Alexandre Boissiere
+// This file is part of the BadLands operating system.
+//
+// This program is free software: you can redistribute it and/or modify it under the terms of the
+// GNU General Public License as published by the Free Software Foundation, version 3.
+// This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+// without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+// See the GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License along with this program.
+// If not, see <https://www.gnu.org/licenses/>. 
+
 #include <cstddef>
 #include <cstdint>
 
+#include <shared/Response.hpp>
 #include <shared/memory/defs.hpp>
 
 #include <mm/Paging.hpp>
@@ -41,14 +56,14 @@ namespace VirtualMemory {
 		);
 
         template<bool usePrimary = true>
-        static inline StatusCode MapPage(
+        static inline Success MapPage(
 			uint64_t _physicalAddress,
 			uint64_t _virtualAddress,
 			AccessPrivilege privilege,
 			bool huge = false
 		) {
             if (_physicalAddress % ShdMem::FRAME_SIZE != 0 || _virtualAddress % ShdMem::FRAME_SIZE != 0) {
-                return StatusCode::INVALID_PARAMETER;
+                return Failure();
             }
 
             const auto mapping = ShdMem::ParseVirtualAddress(_virtualAddress);
@@ -60,7 +75,7 @@ namespace VirtualMemory {
                 void* page = PhysicalMemory::Allocate();
 
                 if (page == nullptr) {
-                    return StatusCode::OUT_OF_MEMORY;
+                    return Failure();
                 }
 
 				Paging::SetPML4EInfo(pml4e, {
@@ -82,7 +97,7 @@ namespace VirtualMemory {
                 void* page = PhysicalMemory::Allocate();
 
                 if (page == nullptr) {
-                    return StatusCode::OUT_OF_MEMORY;
+                    return Failure();
                 }
 				
 				Paging::SetPDPTEInfo(pdpte, {
@@ -122,7 +137,7 @@ namespace VirtualMemory {
 					void* page = PhysicalMemory::Allocate();
 
 					if (page == nullptr) {
-						return StatusCode::OUT_OF_MEMORY;
+						return Failure();
 					}
 
 					Paging::SetPDEInfo(pde, {
@@ -153,11 +168,11 @@ namespace VirtualMemory {
 				Paging::InvalidatePage(reinterpret_cast<void*>(_virtualAddress));
 			}
 
-            return StatusCode::SUCCESS;
+            return Success();
         }
 
         template<bool usePrimary = true>
-		static inline StatusCode MapOnDemand(const void* _address, uint64_t pages, AccessPrivilege privilege) {
+		static inline Success MapOnDemand(const void* _address, uint64_t pages, AccessPrivilege privilege) {
 			const uint8_t* address = static_cast<const uint8_t*>(_address);
 
 			for (size_t i = 0; i < pages; ++i) {
@@ -170,7 +185,7 @@ namespace VirtualMemory {
 					void* page = PhysicalMemory::Allocate();
 
 					if (page == nullptr) {
-						return StatusCode::OUT_OF_MEMORY;
+						return Failure();
 					}
 
 					Paging::SetPML4EInfo(pml4e, {
@@ -192,7 +207,7 @@ namespace VirtualMemory {
 					void* page = PhysicalMemory::Allocate();
 
 					if (page == nullptr) {
-						return StatusCode::OUT_OF_MEMORY;
+						return Failure();
 					}
 
 					Paging::SetPDPTEInfo(pdpte, {
@@ -214,7 +229,7 @@ namespace VirtualMemory {
 					void* page = PhysicalMemory::Allocate();
 
 					if (page == nullptr) {
-						return StatusCode::OUT_OF_MEMORY;
+						return Failure();
 					}
 
 					Paging::SetPDEInfo(pde, {
@@ -240,13 +255,13 @@ namespace VirtualMemory {
 				address += ShdMem::FRAME_SIZE;
 			}
 
-			return StatusCode::SUCCESS;
+			return Success();
 		}
 
-        static inline StatusCode ExpandVirtualMemoryMap(uint64_t start, uint64_t blocks) {
+        static inline Success ExpandVirtualMemoryMap(uint64_t start, uint64_t blocks) {
 			void* page = PhysicalMemory::Allocate();
 			if (page == nullptr) {
-				return StatusCode::OUT_OF_MEMORY;
+				return Failure();
 			}
 
 			return MapPage(reinterpret_cast<uint64_t>(page), start + blocks * sizeof(VMemMapBlock), AccessPrivilege::HIGH);
@@ -282,7 +297,7 @@ namespace VirtualMemory {
 
 			void* pagesStart = reinterpret_cast<void*>(block->virtualStart);
 
-			if (MapOnDemand(pagesStart, pages, AccessPrivilege::LOW) != StatusCode::SUCCESS) {
+			if (!MapOnDemand(pagesStart, pages, AccessPrivilege::LOW).IsSuccess()) {
 				return nullptr;
 			}
 
@@ -296,18 +311,11 @@ namespace VirtualMemory {
 		}
 
         template<AccessPrivilege privilege, bool useHint = false>
-		static inline void* AllocateCore(uint64_t pages, [[maybe_unused]] void* hintPtr, bool contiguous = false, bool huge = false) {
-			constexpr uint64_t hugePageSize = ShdMem::PDE_COVERAGE;
-			constexpr uint64_t hugePageSizeInPages = hugePageSize / ShdMem::PAGE_SIZE;
-			
+		static inline void* AllocateCore(uint64_t pages, [[maybe_unused]] void* hintPtr) {			
 			constexpr uint64_t managementBase = privilege == AccessPrivilege::HIGH
 				? VirtualMemoryLayout::KernelHeapManagement.start
 				: (VirtualMemoryLayout::UserVMemManagement.start
 					+ (sizeof(*userContext) + sizeof(VMemMapBlock) - 1) / sizeof(VMemMapBlock));
-
-			if (huge && (!contiguous || (pages % hugePageSizeInPages) != 0)) {
-				return nullptr;
-			}
 			
 			MemoryContext* ctx = privilege == AccessPrivilege::HIGH ? &kernelContext : userContext;
 
@@ -385,7 +393,7 @@ namespace VirtualMemory {
 								return AllocateHintCore<privilege>(vmmb, index, pages);
 							}
 							else if (nextBlock.availablePages == 0) {
-								if (MapOnDemand(hintPtr, pages, privilege) != StatusCode::SUCCESS) {
+								if (!MapOnDemand(hintPtr, pages, privilege).IsSuccess()) {
 									return nullptr;
 								}
 
@@ -397,13 +405,13 @@ namespace VirtualMemory {
 							}
 							else {
 								if (ctx->availableBlockMemory == 0) {
-									if (ExpandVirtualMemoryMap(managementBase, ctx->storedBlocks) != StatusCode::SUCCESS) {
+									if (!ExpandVirtualMemoryMap(managementBase, ctx->storedBlocks).IsSuccess()) {
 										return nullptr;
 									}
 									ctx->availableBlockMemory += ShdMem::FRAME_SIZE;
 								}
 
-								if (MapOnDemand(hintPtr, pages, privilege) != StatusCode::SUCCESS) {
+								if (!MapOnDemand(hintPtr, pages, privilege).IsSuccess()) {
 									return nullptr;
 								}
 
@@ -438,31 +446,7 @@ namespace VirtualMemory {
 			);
 			const bool remove = vmmb->availablePages == 0;
 
-			if (contiguous) {
-				void* physical_pages = PhysicalMemory::AllocatePages(pages, huge ? hugePageSize : 0);
-
-				if (physical_pages == nullptr) {
-					vmmb->availablePages += pages;
-					return nullptr;
-				}
-
-				const uint64_t effective_frame_size = huge ? hugePageSize : ShdMem::FRAME_SIZE;
-				const uint64_t iteration_range = huge ? (pages / hugePageSizeInPages) : pages;
-
-				for (size_t i = 0; i < iteration_range; ++i) {
-					const uint64_t physicalAddress = PhysicalMemory::FilterAddress(
-						reinterpret_cast<uint8_t*>(physical_pages) + i * effective_frame_size
-					);
-					const uint64_t virtualAddress = reinterpret_cast<uint64_t>(pagesStart) + i * effective_frame_size;
-
-					if (MapPage(physicalAddress, virtualAddress, privilege, huge) != StatusCode::SUCCESS) {
-						PhysicalMemory::FreePages(physical_pages, pages);
-						vmmb->availablePages += pages;
-						return nullptr;
-					}
-				}
-			}
-			else if (MapOnDemand(pagesStart, pages, privilege) != StatusCode::SUCCESS) {
+			if (!MapOnDemand(pagesStart, pages, privilege).IsSuccess()) {
 				vmmb->availablePages += pages;
 				return nullptr;
 			}
@@ -491,7 +475,7 @@ namespace VirtualMemory {
 			return pagesStart;
 		}
 
-		template<AccessPrivilege privilege> static inline StatusCode FreeCore(void* ptr, uint64_t pages) {
+		template<AccessPrivilege privilege> static inline Success FreeCore(void* ptr, uint64_t pages) {
 			constexpr uint64_t managementBase = privilege == AccessPrivilege::HIGH
 				? VirtualMemoryLayout::KernelHeapManagement.start
 				: (VirtualMemoryLayout::UserVMemManagement.start
@@ -500,7 +484,7 @@ namespace VirtualMemory {
 			MemoryContext* ctx = privilege == AccessPrivilege::HIGH ? &kernelContext : userContext;
 
 			if (pages == 0) {
-				return StatusCode::SUCCESS;
+				return Success();
 			}
 			
 			uint64_t address = reinterpret_cast<uint64_t>(ptr);
@@ -510,7 +494,7 @@ namespace VirtualMemory {
 					|| address < VirtualMemoryLayout::UserMemory.start
 					|| address + pages * ShdMem::FRAME_SIZE < address
 				) {
-					return StatusCode::INVALID_PARAMETER;
+					return Failure();
 				}
 			}
 
@@ -529,7 +513,7 @@ namespace VirtualMemory {
 
 				if constexpr (privilege == AccessPrivilege::LOW) {
 					if (!pml4e_info.present || !pdpte_info.present || !pde_info.present || *pte == 0) {
-						return StatusCode::INVALID_PARAMETER;
+						return Failure();
 					}
 				}
 
@@ -539,8 +523,8 @@ namespace VirtualMemory {
 
 						void* const pageAddress = reinterpret_cast<void*>(pde_info.address);
 
-						if (PhysicalMemory::FreePages(pageAddress, pagesPerHugePage) != PhysicalMemory::StatusCode::SUCCESS) {
-							return StatusCode::OUT_OF_MEMORY;
+						if (!PhysicalMemory::Free2MB(pageAddress).IsSuccess()) {
+							return Failure();
 						}
 
 						Paging::UnmapPDE(pde);
@@ -553,8 +537,8 @@ namespace VirtualMemory {
 						if (pte_info.present) {
 							void* pageAddress = reinterpret_cast<void*>(pte_info.address);
 
-							if (PhysicalMemory::Free(pageAddress) != PhysicalMemory::StatusCode::SUCCESS) {
-								return StatusCode::OUT_OF_MEMORY;
+							if (!PhysicalMemory::Free(pageAddress).IsSuccess()) {
+								return Failure();
 							}
 
 							Paging::UnmapPTE(pte);
@@ -575,9 +559,11 @@ namespace VirtualMemory {
 
 			if (ctx->availableBlockMemory == 0) {
 				auto status = ExpandVirtualMemoryMap(managementBase, ctx->storedBlocks);
-				if (status != StatusCode::SUCCESS) {
-					return status;
+
+				if (!status.IsSuccess()) {
+					return Failure();
 				}
+
 				ctx->availableBlockMemory += ShdMem::FRAME_SIZE;
 			}
 
@@ -587,15 +573,15 @@ namespace VirtualMemory {
 			ctx->availableMemory += pages * ShdMem::FRAME_SIZE;
 			RSortVirtualMemoryMap(blockPtr, ctx->storedBlocks);
 
-			return StatusCode::SUCCESS;
+			return Success();
 		}
     }
 
-	StatusCode Setup() {
+	Success Setup() {
 		// make the NULL memory page reserved and unusable, and allocate the DMA PML4E and PDPTE
 		if (PhysicalMemory::QueryDMAAddress(0) == PhysicalMemory::StatusCode::FREE) {
 			if (VirtualMemory::AllocateDMA(1) == nullptr) {
-				return StatusCode::INTERNAL_ERROR;
+				return Failure();
 			}
 		}
 		else {
@@ -631,7 +617,7 @@ namespace VirtualMemory {
 					void* page = PhysicalMemory::Allocate();
 					
 					if (page == nullptr) {
-						return StatusCode::OUT_OF_MEMORY;
+						return Failure();
 					}
 
 					Paging::SetPDPTEInfo(pdpte, {
@@ -651,7 +637,7 @@ namespace VirtualMemory {
 					void* page = PhysicalMemory::Allocate();
 
 					if (page == nullptr) {
-						return StatusCode::OUT_OF_MEMORY;
+						return Failure();
 					}
 					
 					Paging::SetPDEInfo(pde, {
@@ -670,16 +656,15 @@ namespace VirtualMemory {
 		// set up kernel heap
 		void* basePage = PhysicalMemory::Allocate();
 		if (basePage == nullptr) {
-			return StatusCode::OUT_OF_MEMORY;
+			return Failure();
 		}
 
-		auto status = MapPage(
+		if (!MapPage(
 			reinterpret_cast<uint64_t>(basePage),
 			VirtualMemoryLayout::KernelHeapManagement.start,
 			AccessPrivilege::HIGH
-		);
-		if (status != StatusCode::SUCCESS) {
-			return status;
+		).IsSuccess()) {
+			return Failure();
 		}
 
 		kernelContext.availableBlockMemory = ShdMem::FRAME_SIZE - sizeof(VMemMapBlock);
@@ -689,7 +674,7 @@ namespace VirtualMemory {
 		kernelHeapBlockPtr->virtualStart = VirtualMemoryLayout::KernelHeap.start;
 		kernelHeapBlockPtr->availablePages = kernelContext.availableMemory / ShdMem::FRAME_SIZE;
 		
-		return status;
+		return Success();
 	}
 
 	void* DeriveNewFreshCR3() {
@@ -708,13 +693,11 @@ namespace VirtualMemory {
 		/// How to fix: create a method to completely free an entire page table
 
 		// setup kernel stack and kernel stack guard
-		auto status = MapOnDemand<false>(
+		if (!MapOnDemand<false>(
 			reinterpret_cast<void*>(VirtualMemoryLayout::KernelStack.start),
 			(VirtualMemoryLayout::KernelStack.limit - ShdMem::PAGE_SIZE) / ShdMem::PAGE_SIZE,
 			AccessPrivilege::HIGH
-		);
-
-		if (status != StatusCode::SUCCESS) {
+		).IsSuccess()) {
 			Paging::FreeSecondaryRecursiveMapping();
 			return nullptr;
 		}
@@ -740,26 +723,22 @@ namespace VirtualMemory {
 			return nullptr;
 		}
 
-		status = MapPage<false>(
+		if (!MapPage<false>(
 			reinterpret_cast<uint64_t>(stack_top),
 			VirtualMemoryLayout::KernelStackReserve.start - ShdMem::PAGE_SIZE,
 			AccessPrivilege::HIGH
-		);
-
-		if (status != StatusCode::SUCCESS) {
+		).IsSuccess()) {
 			PhysicalMemory::Free(stack_reserve);
 			PhysicalMemory::Free(stack_top);
 			Paging::FreeSecondaryRecursiveMapping();
 			return nullptr;
 		}
 
-		status = MapPage<false>(
+		if (!MapPage<false>(
 			reinterpret_cast<uint64_t>(stack_reserve),
 			VirtualMemoryLayout::KernelStackReserve.start,
 			AccessPrivilege::HIGH
-		);
-
-		if (status != StatusCode::SUCCESS) {
+		).IsSuccess()) {
 			PhysicalMemory::Free(stack_reserve);
 			Paging::FreeSecondaryRecursiveMapping();
 			return nullptr;
@@ -773,13 +752,11 @@ namespace VirtualMemory {
 			return nullptr;
 		}
 
-		status = MapPage<false>(
+		if (!MapPage<false>(
 			reinterpret_cast<uint64_t>(base_page),
 			reinterpret_cast<uint64_t>(userContext),
 			AccessPrivilege::HIGH
-		);
-
-		if (status != StatusCode::SUCCESS) {
+		).IsSuccess()) {
 			PhysicalMemory::Free(base_page);
 			Paging::FreeSecondaryRecursiveMapping();
 			return nullptr;
@@ -821,7 +798,7 @@ namespace VirtualMemory {
 		uint64_t address = reinterpret_cast<uint64_t>(allocated);
 
 		for (size_t i = 0; i < pages; ++i, address += ShdMem::FRAME_SIZE) {
-			if (MapPage(address, address, AccessPrivilege::MEDIUM) != StatusCode::SUCCESS) {
+			if (!MapPage(address, address, AccessPrivilege::MEDIUM).IsSuccess()) {
 				return nullptr;
 			}
 		}
@@ -829,8 +806,8 @@ namespace VirtualMemory {
 		return allocated;
 	}
 
-	void* AllocateKernelHeap(uint64_t pages, bool contiguous, bool huge) {
-		return AllocateCore<AccessPrivilege::HIGH>(pages, nullptr, contiguous, huge);
+	void* AllocateKernelHeap(uint64_t pages) {
+		return AllocateCore<AccessPrivilege::HIGH>(pages, nullptr);
 	}
 
 	void* AllocateUserPages(uint64_t pages) {
@@ -841,11 +818,9 @@ namespace VirtualMemory {
 		return AllocateCore<AccessPrivilege::LOW, true>(pages, ptr);
 	}
 
-	StatusCode FreeDMA(void* ptr, uint64_t pages) {
-		const auto status = PhysicalMemory::FreeDMA(ptr, pages);
-
-		if (status != PhysicalMemory::StatusCode::SUCCESS) {
-			return StatusCode::INVALID_PARAMETER;
+	Success FreeDMA(void* ptr, uint64_t pages) {
+		if (!PhysicalMemory::FreeDMA(ptr, pages).IsSuccess()) {
+			return Failure();
 		}
 
 		uint64_t address = reinterpret_cast<uint64_t>(ptr);
@@ -857,23 +832,21 @@ namespace VirtualMemory {
 			Paging::InvalidatePage(reinterpret_cast<void*>(address));
 		}
 
-		return StatusCode::SUCCESS;
+		return Success();
 	}
 
-	StatusCode FreeKernelHeap(void* ptr, uint64_t pages) {
+	Success FreeKernelHeap(void* ptr, uint64_t pages) {
 		return FreeCore<AccessPrivilege::HIGH>(ptr, pages);
 	}
 
-	StatusCode FreeUserPages(void* ptr, uint64_t pages) {
+	Success FreeUserPages(void* ptr, uint64_t pages) {
 		return FreeCore<AccessPrivilege::LOW>(ptr, pages);
 	}
 
-	StatusCode ChangeMappingFlags(void* _ptr, uint64_t flags, uint64_t pages, bool huge) {
-		const uint64_t ptr_increment = huge ? ShdMem::PDE_COVERAGE : ShdMem::PTE_COVERAGE;
-		
+	Success ChangeMappingFlags(void* _ptr, uint64_t flags, uint64_t pages) {		
 		uint64_t ptr = reinterpret_cast<uint64_t>(_ptr);
 
-		for (size_t i = 0; i < pages; ++i, ptr += ptr_increment) {
+		for (size_t i = 0; i < pages; ++i, ptr += ShdMem::PTE_COVERAGE) {
 			const ShdMem::VirtualAddress mapping = ShdMem::ParseVirtualAddress(ptr);
 			
 			const auto pml4e = Paging::GetPML4EAddress(mapping);
@@ -885,14 +858,8 @@ namespace VirtualMemory {
 			const auto pdpte_info = Paging::GetPDPTEInfo(pdpte);
 			const auto pde_info = Paging::GetPDEInfo(pde);
 
-			if (!pml4e_info.present) {
-				return StatusCode::INVALID_PARAMETER;
-			}
-			else if (!pdpte_info.present) {
-				return StatusCode::INVALID_PARAMETER;
-			}
-			else if (!pde_info.present) {
-				return StatusCode::INVALID_PARAMETER;
+			if (!pml4e_info.present || !pdpte_info.present || !pde_info.present) {
+				return Failure();
 			}
 			else if (pde_info.pageSize) {
 				*pde = (*pde & (ShdMem::PDE_ADDRESS)) | (flags & ~ShdMem::PDE_ADDRESS);
@@ -904,7 +871,7 @@ namespace VirtualMemory {
 			Paging::InvalidatePage(reinterpret_cast<void*>(ptr));
 		}
 
-		return StatusCode::SUCCESS;
+		return Success();
 	}
 
 	void* MapGeneralPages(void* pageAddress, size_t pages, uint64_t flags) {
@@ -994,9 +961,9 @@ namespace VirtualMemory {
 		return nullptr;
 	}
 
-	StatusCode UnmapGeneralPages(void* vpage, size_t pages) {
+	Success UnmapGeneralPages(void* vpage, size_t pages) {
 		if (pages == 0) {
-			return StatusCode::SUCCESS;
+			return Success();
 		}
 
 		uint64_t address = reinterpret_cast<uint64_t>(vpage);
@@ -1013,20 +980,14 @@ namespace VirtualMemory {
 			const auto pdpte_info 	= Paging::GetPDPTEInfo(pdpte);
 			const auto pde_info 	= Paging::GetPDEInfo(pde);
 
-			if (!pml4e_info.present) {
-				return StatusCode::INVALID_PARAMETER;
-			}
-			else if (!pdpte_info.present) {
-				return StatusCode::INVALID_PARAMETER;
-			}
-			else if (!pde_info.present) {
-				return StatusCode::INVALID_PARAMETER;
+			if (!pml4e_info.present || !pdpte_info.present || !pde_info.present) {
+				return Failure();
 			}
 
 			Paging::UnmapPTE(pte);
 			Paging::InvalidatePage(reinterpret_cast<void*>(address));
 		}
 
-		return StatusCode::SUCCESS;
+		return Success();
 	}
 }

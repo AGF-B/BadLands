@@ -1,7 +1,22 @@
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Copyright (C) 2026 Alexandre Boissiere
+// This file is part of the BadLands operating system.
+//
+// This program is free software: you can redistribute it and/or modify it under the terms of the
+// GNU General Public License as published by the Free Software Foundation, version 3.
+// This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+// without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+// See the GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License along with this program.
+// If not, see <https://www.gnu.org/licenses/>. 
+
 #include <cstdint>
 
 #include <exports.hpp>
 
+#include <shared/Response.hpp>
 #include <shared/efi/efi.h>
 #include <shared/memory/layout.hpp>
 
@@ -60,19 +75,13 @@ namespace {
     }
 
     static inline void SetupPhysicalMemory() {
-        auto status = PhysicalMemory::Setup();
-        if (status != PhysicalMemory::StatusCode::SUCCESS) {
-            if (status == PhysicalMemory::StatusCode::OUT_OF_MEMORY) {
-                Panic::PanicShutdown("PMM INITIALIZATION FAILED (OUT OF MEMORY)\n\r");
-            }
-            else {
-                Panic::PanicShutdown("PMM INITIALIZATION FAILED (UNKNOWN REASON)\n\r");
-            }
+        if (!PhysicalMemory::Setup().IsSuccess()) {
+            Panic::PanicShutdown("PMM INITIALIZATION FAILEDs\n\r");
         }
     }
 
     static inline void SetupVirtualMemory() {
-        if (VirtualMemory::Setup() != VirtualMemory::StatusCode::SUCCESS) {
+        if (!VirtualMemory::Setup().IsSuccess()) {
             Panic::PanicShutdown("VMM INITIALIZATION FAILED\n\r");
         }
     }

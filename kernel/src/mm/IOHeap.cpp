@@ -1,3 +1,17 @@
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Copyright (C) 2026 Alexandre Boissiere
+// This file is part of the BadLands operating system.
+//
+// This program is free software: you can redistribute it and/or modify it under the terms of the
+// GNU General Public License as published by the Free Software Foundation, version 3.
+// This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+// without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+// See the GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License along with this program.
+// If not, see <https://www.gnu.org/licenses/>. 
+
 #include <cstddef>
 #include <cstdint>
 
@@ -7,6 +21,7 @@
 #include <shared/memory/defs.hpp>
 
 #include <mm/IOHeap.hpp>
+#include <mm/PhysicalMemory.hpp>
 #include <mm/VirtualMemory.hpp>
 
 namespace ShdMem = Shared::Memory;
@@ -32,20 +47,22 @@ namespace IOHeap {
 
     Success Create() {
         if (head == nullptr) {
-            head = static_cast<Metadata*>(VirtualMemory::AllocateKernelHeap(DEFAULT_PAGES, true, true));
+            void* const physical_region = PhysicalMemory::Allocate32MB();
 
-            if (head == nullptr) {
+            if (physical_region == nullptr) {
                 return Failure();
             }
 
-            if (VirtualMemory::ChangeMappingFlags(
-                head,
-                ShdMem::PDE_PAGE_SIZE | ShdMem::PDE_UNCACHEABLE | ShdMem::PDE_READWRITE | ShdMem::PDE_PRESENT,
-                DEFAULT_HUGE_PAGES,
-                true
-            ) != VirtualMemory::StatusCode::SUCCESS) {
-                VirtualMemory::FreeKernelHeap(head, DEFAULT_PAGES);
-                head = nullptr;
+            head = reinterpret_cast<Metadata*>(
+                VirtualMemory::MapGeneralPages(
+                    physical_region,
+                    DEFAULT_HUGE_PAGES,
+                    ShdMem::PDE_PAGE_SIZE | ShdMem::PDE_UNCACHEABLE | ShdMem::PDE_READWRITE | ShdMem::PDE_PRESENT
+                )
+            );
+
+            if (head == nullptr) {
+                PhysicalMemory::Free32MB(physical_region);
                 return Failure();
             }
 
