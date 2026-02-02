@@ -90,6 +90,8 @@ public:
     void SpinWaitMillis(uint64_t ms) const;
     bool SpinWaitMillsFor(uint64_t ms, bool (*predicate)(void*), void* args) const;
 
+    void Yield();
+
     static Timer& GetPIT();
     Timer& GetTimer();
 

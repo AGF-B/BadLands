@@ -186,6 +186,8 @@ registerProvider(14, &Interrupts::Core::page_fault_trampoline);
 	for (int i = 0; i < 0x20; ++i) {
 		ReserveKnownInterrupt(i);
 	}
+
+	ReserveKnownInterrupt(SOFTWARE_YIELD_IRQ);
 }
 
 void Interrupts::ForceIRQHandler(unsigned int interruptVector, void* handler) {

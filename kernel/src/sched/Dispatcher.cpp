@@ -12,6 +12,9 @@
 // You should have received a copy of the GNU General Public License along with this program.
 // If not, see <https://www.gnu.org/licenses/>. 
 
+#include <interrupts/IDT.hpp>
+#include <interrupts/Panic.hpp>
+
 #include <sched/Self.hpp>
 #include <sched/Dispatcher.hpp>
 
@@ -24,32 +27,47 @@ namespace Scheduling {
     };
 
     extern "C" void SCHEDULER_IRQ_HANDLER();
+    extern "C" void SCHEDULER_SOFT_IRQ_HANDLER();
 
     void InitializeDispatcher() {
         __asm__ volatile("cli");
+
+        // Setup timer IRQ handler for scheduling
         Self().GetTimer().ReattachIRQ(&SCHEDULER_IRQ_HANDLER);
+        Interrupts::ForceIRQHandler(Interrupts::SOFTWARE_YIELD_IRQ, reinterpret_cast<void*>(&SCHEDULER_SOFT_IRQ_HANDLER));
+
         Log::printfSafe("[CPU %llu] Scheduler Initialized\n\r", Self().GetID());
+        
         __asm__ volatile("sti");
     }
 
-    extern "C" void SCHEDULER_IRQ_DISPATCHER(SwitchResult* result, void* stack_context) {
+    static void Reschedule(SwitchResult* result, void* stack_context, UnattachedSelf& self) {
+        auto* task = self.GetTaskManager().TaskSwitch(stack_context);
+
+        if (task != nullptr) {
+            result->CR3 = task->CR3;
+            result->RSP = task->StackPointer;
+        }
+    }
+
+    extern "C" void SCHEDULER_IRQ_DISPATCHER(SwitchResult* result, void* stack_context, bool is_timer_irq) {
         if (result != nullptr) {
             result->CR3 = nullptr;
             result->RSP = nullptr;
             
             auto& self = Self();
-            auto& timer = self.GetTimer();
 
-            timer.SignalIRQ();
-            timer.SendEOI();
+            if (is_timer_irq) {
+                auto& timer = self.GetTimer();
+                timer.SignalIRQ();
+                timer.SendEOI();
 
-            if (timer.GetCountMillis() % 10 == 0) {
-                auto* task = self.GetTaskManager().TaskSwitch(stack_context);
-
-                if (task != nullptr) {
-                    result->CR3 = task->CR3;
-                    result->RSP = task->StackPointer;
+                if (timer.GetCountMillis() % 10 == 0) {
+                    Reschedule(result, stack_context, self);
                 }
+            }
+            else {
+                Reschedule(result, stack_context, self);
             }
         }
     }

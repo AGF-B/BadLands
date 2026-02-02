@@ -291,6 +291,10 @@ bool UnattachedSelf::SpinWaitMillsFor(uint64_t ms, bool (*predicate)(void*), voi
     return false;
 }
 
+void UnattachedSelf::Yield() {
+    __asm__ volatile("int %0" :: "N"(Interrupts::SOFTWARE_YIELD_IRQ));
+}
+
 Timer& UnattachedSelf::GetPIT() {
     return PITWrapper;
 }

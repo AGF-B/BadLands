@@ -15,6 +15,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 
 #include <interrupts/InterruptProvider.hpp>
 
@@ -25,4 +26,6 @@ namespace Interrupts {
 	void RegisterIRQ(unsigned int interruptVector, InterruptProvider* provider);
 	int ReserveInterrupt();
 	void ReleaseInterrupt(int i);
+
+	static inline constexpr uint8_t SOFTWARE_YIELD_IRQ = 0x21;
 }
