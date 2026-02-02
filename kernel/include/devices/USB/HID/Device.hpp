@@ -199,10 +199,11 @@ namespace Devices {
                 static Optional<Device*> Create(xHCI::Device& device, uint8_t configuration_value, const FunctionDescriptor* function);
 
                 virtual Success PostInitialization() override;
-                
-                virtual void Release() override;
 
                 virtual void SignalTransferComplete(const xHCI::TransferEventTRB& trb) override;
+
+            protected:
+                virtual void Release() override;
             };
 
             class InterfaceDevice {

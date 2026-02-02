@@ -252,6 +252,17 @@ namespace Devices {
                 static Optional<uint8_t> ConvertEndpointInterval(const Device& device, const EndpointType& type, uint16_t interval);
 
                 Device(const Device&);
+                
+                Utils::Lock                 state_lock;
+                Utils::SimpleAtomic<bool>   unavailable{false};
+                Utils::SimpleAtomic<size_t> current_accesses{0};
+
+                void            SetUnvailable();
+                bool            IsUnavailable() const;
+                Success         SetBusy();
+                void            ReleaseBusy();
+                bool            IsBusy() const;
+                virtual void    Release();
 
             public:
                 Device(Controller& controller, const DeviceInformation& information);
@@ -261,7 +272,7 @@ namespace Devices {
 
                 Optional<Device*> Initialize();
                 virtual inline Success PostInitialization() { return Success(); }
-                virtual void Release();
+                void Destroy();
 
                 virtual void SignalTransferComplete(const TransferEventTRB& trb);
 

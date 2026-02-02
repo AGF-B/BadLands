@@ -716,6 +716,14 @@ namespace Devices::USB::HID {
     }
 
     Success Device::PostInitialization() {
+        if (!SetBusy().IsSuccess()) {
+            if constexpr (Debug::DEBUG_HID_ERRORS) {
+                Log::printfSafe("[HID] Failed to set device %u as busy\r\n", information.slot_id);
+            }
+
+            return Failure();
+        }
+
         InterfaceDescriptor* interface = function->interfaces;
 
         while (interface != nullptr && interrupt_in_ep_address == 0) {
@@ -735,6 +743,7 @@ namespace Devices::USB::HID {
                 Log::printfSafe("[HID] Could not find interrupt IN endpoint in interface\n\r");
             }
 
+            ReleaseBusy();
             return Failure();
         }
 
@@ -745,15 +754,21 @@ namespace Devices::USB::HID {
                 Log::printfSafe("[HID] Could not get transfer ring for interrupt IN endpoint 0x%0.2hhx\n\r", interrupt_in_ep_address);
             }
             
+            ReleaseBusy();
             return Failure();
         }
 
         InitiateTransaction();
 
+        ReleaseBusy();
         return Success();
     }
 
     void Device::SignalTransferComplete(const xHCI::TransferEventTRB& trb) {
+        if (!SetBusy().IsSuccess()) {
+            return;
+        }
+
         const auto physical_address_wrapper = Paging::GetPhysicalAddress(last_sent_trb);
 
         if (physical_address_wrapper.HasValue() && trb.GetPointer() == physical_address_wrapper.GetValue()) {
@@ -763,6 +778,8 @@ namespace Devices::USB::HID {
         else {
             xHCI::Device::SignalTransferComplete(trb);
         }
+
+        ReleaseBusy();
     }
 
     void Device::Release() {

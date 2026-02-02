@@ -16,6 +16,7 @@
 #include <new>
 
 #include <shared/memory/defs.hpp>
+#include <shared/Debug.hpp>
 #include <shared/LockGuard.hpp>
 #include <shared/MemoryOrdering.hpp>
 #include <shared/Response.hpp>
@@ -169,7 +170,9 @@ namespace Devices::USB::xHCI {
                     break;
                 }
                 default: {
-                    Log::putsSafe("USB xHCI: Unknown Event Type\n\r");
+                    if constexpr (Debug::DEBUG_USB_SOFT_ERRORS) {
+                        Log::putsSafe("USB xHCI: Unknown Event Type\n\r");
+                    }
                     break;
                 }
             }
@@ -618,7 +621,10 @@ namespace Devices::USB::xHCI {
                     auto* const port = AccessOperationalPort(i);
 
                     if (!(port->PORTSC & OperationalPort::PORTSC_PP)) {
-                        Log::printfSafe("[xHCI] Port 0x%0.2hhx (USB %hhu) is powered off\n\r", i, revision);
+                        if constexpr (Debug::DEBUG_USB_INFO) {
+                            Log::printfSafe("[xHCI] Port 0x%0.2hhx (USB %hhu) is powered off\n\r", i, revision);
+                        }
+
                         continue;
                     }
 
@@ -631,10 +637,18 @@ namespace Devices::USB::xHCI {
                     port->PORTSC = OperationalPort::PORTSC_CSC | OperationalPort::PORTSC_PRC | OperationalPort::PORTSC_PP;
 
                     if (!is_connected) {
-                        Log::printfSafe("[xHCI] Port 0x%0.2hhx (USB %hhu) is disconnected\n\r", i, revision);
+                        if constexpr (Debug::DEBUG_USB_INFO) {
+                            Log::printfSafe("[xHCI] Port 0x%0.2hhx (USB %hhu) is disconnected\n\r", i, revision);
+                        }
+
                         uint8_t& slot = ports[i].slot;
 
                         if (slot != 0) {
+                            if (devices[slot - 1] != nullptr) {
+                                devices[slot - 1]->Destroy();
+                                devices[slot - 1] = nullptr;
+                            }
+
                             DisableSlot(slot);
                             slot = 0;
                         }
@@ -646,19 +660,27 @@ namespace Devices::USB::xHCI {
                         if (!(port_enabled && finished_reset)) {
                             if (conn_changed) {
                                 // reset port
-                                Log::printfSafe("[xHCI] Port 0x%0.2hhx (USB 2) reset in progress\n\r", i);
+                                if constexpr (Debug::DEBUG_USB_INFO) {
+                                    Log::printfSafe("[xHCI] Port 0x%0.2hhx (USB 2) reset in progress\n\r", i);
+                                }
+
                                 port->PORTSC = OperationalPort::PORTSC_PR | OperationalPort::PORTSC_PP;
                                 continue;
                             }
 
-                            Log::printfSafe("[xHCI] Port 0x%0.2hhx (USB 2) reset failed\n\r", i);
+                            if constexpr (Debug::DEBUG_USB_SOFT_ERRORS) {
+                                Log::printfSafe("[xHCI] Port 0x%0.2hhx (USB 2) reset failed\n\r", i);
+                            }
                             
                             continue;
                         }
                     }
                     else if (revision == 3) {
                         if (!conn_changed | !port_enabled) {
-                            Log::printfSafe("[xHCI] Port 0x%0.2hhx (USB 3) reset failed\n\r", i);
+                            if constexpr (Debug::DEBUG_USB_SOFT_ERRORS) {
+                                Log::printfSafe("[xHCI] Port 0x%0.2hhx (USB 3) reset failed\n\r", i);
+                            }
+
                             continue;
                         }
                     }
@@ -668,28 +690,38 @@ namespace Devices::USB::xHCI {
 
                     const uint8_t speed_id = port->GetSpeedID();
                     
-                    Log::printfSafe(
-                        "[xHCI] Device attached and connected to port 0x%0.2hhx (USB %hhu) with speed %u\n\r",
-                        i,
-                        ports[i].major,
-                        speed_id
-                    );
+                    if constexpr (Debug::DEBUG_USB_INFO) {
+                        Log::printfSafe(
+                            "[xHCI] Device attached and connected to port 0x%0.2hhx (USB %hhu) with speed %u\n\r",
+                            i,
+                            ports[i].major,
+                            speed_id
+                        );
+                    }
 
                     auto slot_id = EnableSlot(ports[i].slot_type);
 
                     if (slot_id < 0) {
-                        Log::printfSafe("[xHCI] Could not enable slot for device ttached on port 0x%0.2hhx\n\r", i);
+                        if constexpr (Debug::DEBUG_USB_SOFT_ERRORS) {
+                            Log::printfSafe("[xHCI] Could not enable slot for device ttached on port 0x%0.2hhx\n\r", i);
+                        }
+
                         continue;
                     }
                     else {
                         ports[i].slot = static_cast<uint8_t>(slot_id);
 
-                        Log::printfSafe("[xHCI] Port 0x%0.2hhx mapped to slot %hhu\n\r", i, ports[i].slot);
+                        if constexpr (Debug::DEBUG_USB_INFO) {
+                            Log::printfSafe("[xHCI] Port 0x%0.2hhx mapped to slot %hhu\n\r", i, ports[i].slot);
+                        }
 
                         auto* const raw_device = Heap::Allocate(sizeof(Device));
 
                         if (raw_device == nullptr) {
-                            Log::printfSafe("[xHCI] Could not allocate memory for device on port 0x%0.2hhx\n\r", i);
+                            if constexpr (Debug::DEBUG_USB_SOFT_ERRORS) {
+                                Log::printfSafe("[xHCI] Could not allocate memory for device on port 0x%0.2hhx\n\r", i);
+                            }
+
                             DisableSlot(ports[i].slot);
                             ports[i].slot = 0;
                             continue;
@@ -704,23 +736,33 @@ namespace Devices::USB::xHCI {
                             .depth = 0
                         });
 
-                        devices[slot_id - 1] = generic_device;
+                        auto& pdevice = devices[slot_id - 1];
+
+                        pdevice = generic_device;
 
                         auto device = generic_device->Initialize();
 
                         Heap::Free(raw_device);
 
                         if (!device.HasValue()) {
-                            Log::printfSafe("[xHCI] Failed to initialize device on port 0x%0.2hhx\n\r", i);
+                            if constexpr (Debug::DEBUG_USB_SOFT_ERRORS) {
+                                Log::printfSafe("[xHCI] Failed to initialize device on port 0x%0.2hhx\n\r", i);
+                            }
+
                             DisableSlot(ports[i].slot);
                             ports[i].slot = 0;
                         }
 
-                        devices[slot_id - 1] = device.GetValue();
+                        pdevice = device.GetValue();
 
-                        if (!devices[slot_id - 1]->PostInitialization().IsSuccess()) {
-                            Log::printfSafe("[xHCI] Post-initialization failed for device on port 0x%0.2hhx\n\r", i);
-                            devices[slot_id - 1]->Release();
+                        if (!pdevice->PostInitialization().IsSuccess()) {
+                            if constexpr (Debug::DEBUG_USB_SOFT_ERRORS) {
+                                Log::printfSafe("[xHCI] Post-initialization failed for device on port 0x%0.2hhx\n\r", i);
+                            }
+                            
+                            pdevice->Destroy();
+                            Heap::Free(pdevice);
+                            pdevice = nullptr;
                             DisableSlot(ports[i].slot);
                             ports[i].slot = 0;
                         }
@@ -853,11 +895,16 @@ namespace Devices::USB::xHCI {
             return nullptr;
         }
 
-        Log::putsSafe("[xHCI] MMIO initialized\n\r");
+        if constexpr (Debug::DEBUG_USB_INFO) {
+            Log::putsSafe("[xHCI] MMIO initialized\n\r");
+        }
 
         // reset hub
         if (!controller->ResetHost()) {
-            Log::putsSafe("[xHCI] Failed to reset host controller\n\r");
+            if constexpr (Debug::DEBUG_USB_ERRORS) {
+                Log::putsSafe("[xHCI] Failed to reset host controller\n\r");
+            }
+
             Release(controller);
             return nullptr;
         }
@@ -865,43 +912,65 @@ namespace Devices::USB::xHCI {
         // configure the "max device slots enabled" field
         controller->ConfigureMaxSlotsEnabled();
 
-        Log::printfSafe("[xHCI] Max slots: %llu\n\r", controller->max_slots_enabled);
+        if constexpr (Debug::DEBUG_USB_INFO) {
+            Log::printfSafe("[xHCI] Max slots: %llu\n\r", controller->max_slots_enabled);
+        }
 
         // program the DCBAAP
         if (!controller->ConfigureDCBAAP()) {
-            Log::putsSafe("[xHCI] Failed to configure DCBAAP\n\r");
+            if constexpr (Debug::DEBUG_USB_ERRORS) {
+                Log::putsSafe("[xHCI] Failed to configure DCBAAP\n\r");
+            }
+
             Release(controller);
             return nullptr;
         }
 
-        Log::putsSafe("[xHCI] DCBAAP configured\n\r");
+        if constexpr (Debug::DEBUG_USB_INFO) {
+            Log::putsSafe("[xHCI] DCBAAP configured\n\r");
+        }
 
         // program the CRCR
         if (!controller->ConfigureCommandRing()) {
-            Log::putsSafe("[xHCI] Failed to configure command ring\n\r");
+            if constexpr (Debug::DEBUG_USB_ERRORS) {
+                Log::putsSafe("[xHCI] Failed to configure command ring\n\r");
+            }
+
             Release(controller);
             return nullptr;
         }
 
-        Log::putsSafe("[xHCI] Command ring configured\n\r");
+        if constexpr (Debug::DEBUG_USB_INFO) {
+            Log::putsSafe("[xHCI] Command ring configured\n\r");
+        }
 
         // program the event ring
         if (!controller->ConfigureEventRing()) {
-            Log::putsSafe("[xHCI] Failed to configure event ring\n\r");
+            if constexpr (Debug::DEBUG_USB_ERRORS) {
+                Log::putsSafe("[xHCI] Failed to configure event ring\n\r");
+            }
+
             Release(controller);
             return nullptr;
         }
 
-        Log::putsSafe("[xHCI] Event ring configured\n\r");
+        if constexpr (Debug::DEBUG_USB_INFO) {
+            Log::putsSafe("[xHCI] Event ring configured\n\r");
+        }
 
         // allocate scratchpad buffers
         if (!controller->ConfigureScratchpad()) {
-            Log::putsSafe("[xHCI] Failed to configure scratchpad buffers\n\r");
+            if constexpr (Debug::DEBUG_USB_ERRORS) {
+                Log::putsSafe("[xHCI] Failed to configure scratchpad buffers\n\r");
+            }
+
             Release(controller);
             return nullptr;
         }
 
-        Log::putsSafe("[xHCI] Scratchpad buffers initialized\n\r");
+        if constexpr (Debug::DEBUG_USB_INFO) {
+            Log::putsSafe("[xHCI] Scratchpad buffers initialized\n\r");
+        }
 
         // Program the primary interrupter
         controller->ConfigurePrimaryInterrupter();
@@ -948,21 +1017,27 @@ namespace Devices::USB::xHCI {
         // register interrupt handler
         Interrupts::RegisterIRQ(controller->interrupt_vector, controller);
 
-        Log::putsSafe("[xHCI] Interrupts configured\n\r");
+        if constexpr (Debug::DEBUG_USB_INFO) {
+            Log::putsSafe("[xHCI] Interrupts configured\n\r");
+        }
 
         // turn on the controller
         controller->EnableHost();
 
         controller->interface.EnableBusMaster();
 
-        Log::putsSafe("[xHCI] Host online\n\r");
+        if constexpr (Debug::DEBUG_USB_INFO) {
+            Log::putsSafe("[xHCI] Host online\n\r");
+        }
 
         if (!controller->ConfigurePortVersions()) {
             Release(controller);
             return nullptr;
         }
 
-        Log::putsSafe("[xHCI] Configured USB port versions\n\r");
+        if constexpr (Debug::DEBUG_USB_INFO) {
+            Log::putsSafe("[xHCI] Configured USB port versions\n\r");
+        }
 
         // wait 200 ms to let the controller initialize itself
         Self().SpinWaitMillis(200);
@@ -973,19 +1048,27 @@ namespace Devices::USB::xHCI {
         );
 
         if (!updaterTask.HasValue()) {
-            Log::putsSafe("[xHCI] Failed to create port updater task\n\r");
+            if constexpr (Debug::DEBUG_USB_ERRORS) {
+                Log::putsSafe("[xHCI] Failed to create port updater task\n\r");
+            }
+
             Release(controller);
             return nullptr;
         }
 
         controller->port_updater_task_id = Self().GetTaskManager().AddTask(updaterTask.GetValue());
         if (controller->port_updater_task_id == 0) {
-            Log::putsSafe("[xHCI] Failed to schedule port updater task\n\r");
+            if constexpr (Debug::DEBUG_USB_ERRORS) {
+                Log::putsSafe("[xHCI] Failed to schedule port updater task\n\r");
+            }
+
             Release(controller);
             return nullptr;
         }
 
-        Log::putsSafe("[xHCI] Port updater task configured\n\r");
+        if constexpr (Debug::DEBUG_USB_INFO) {
+            Log::putsSafe("[xHCI] Port updater task configured\n\r");
+        }
 
         return controller;
     }

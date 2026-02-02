@@ -32,6 +32,8 @@
 #include <mm/Heap.hpp>
 #include <mm/Utils.hpp>
 
+#include <sched/Self.hpp>
+
 #include <screen/Log.hpp>
 
 namespace {
@@ -246,9 +248,7 @@ namespace Services {
             Log::putsSafe("[SHELL] Kernel shell initialized\n\r");
             Log::putsSafe("> ");
 
-            while (true) {                
-                __asm__ volatile("hlt");
-
+            while (true) {
                 Devices::KeyboardDispatcher::BasicKeyPacket packet;
 
                 const auto v = keyboardBuffer->Read(0, sizeof(packet), reinterpret_cast<uint8_t*>(&packet));
@@ -261,6 +261,8 @@ namespace Services {
                         inputBuffer.OnKeyEvent(Devices::KeyboardDispatcher::GetVirtualKeyPacket(packet));
                     }
                 }
+
+                Self().Yield();
             }
         }
     }

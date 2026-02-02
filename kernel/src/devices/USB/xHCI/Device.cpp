@@ -1308,6 +1308,14 @@ namespace Devices::USB::xHCI {
     }
 
     Optional<Device*> Device::Initialize() {
+        if (!SetBusy().IsSuccess()) {
+            if constexpr (Debug::DEBUG_USB_ERRORS) {
+                Log::printfSafe("[USB] Failed to set device %u as busy\r\n", information.slot_id);
+            }
+
+            return Optional<Device*>();
+        }
+
         if constexpr (Debug::DEBUG_USB_INFO) {
             Log::printfSafe("[USB] Initializing device %u\r\n", information.slot_id);
         }
@@ -1489,7 +1497,51 @@ namespace Devices::USB::xHCI {
         }
 
         new (ptr) Device(*this);
+
+        ReleaseBusy();
+
         return Optional<Device*>(ptr);
+    }
+
+    void Device::SetUnvailable() {
+        {
+            Utils::LockGuard _{state_lock};
+
+            unavailable.store(true);
+        }
+
+        // Wait for ongoing operations to complete
+        while (IsBusy()) {
+            Self().Yield();
+        }
+    }
+
+    bool Device::IsUnavailable() const {
+        return unavailable.load();
+    }
+
+    Success Device::SetBusy() {
+        Utils::LockGuard _{state_lock};
+
+        if (unavailable.load()) {
+            return Failure();
+        }
+
+        ++current_accesses;
+
+        return Success();
+    }
+
+    void Device::ReleaseBusy() {
+        Utils::LockGuard _{state_lock};
+
+        if (current_accesses > 0) {
+            --current_accesses;
+        }
+    }
+
+    bool Device::IsBusy() const {
+        return current_accesses > 0;
     }
 
     void Device::Release() {
@@ -1518,15 +1570,29 @@ namespace Devices::USB::xHCI {
                 endpoint_transfer_rings[i] = nullptr;
             }
         }
+
+        current_accesses.store(0);
+        unavailable.store(true);
+    }
+
+    void Device::Destroy() {
+        SetUnvailable();
+        Release();
     }
 
     void Device::SignalTransferComplete(const TransferEventTRB& trb) {
+        if (!SetBusy().IsSuccess()) {
+            return;
+        }
+
         const auto awaiting_transfer_address_wrapper = Paging::GetPhysicalAddress(awaiting_transfer);
 
         if (awaiting_transfer_address_wrapper.HasValue() && trb.GetPointer() == awaiting_transfer_address_wrapper.GetValue()) {
             transfer_result = trb;
             transfer_complete.store(true);
         }
+
+        ReleaseBusy();
     }
 
     const Device::DeviceDescriptor& Device::GetDeviceDescriptor() const {
