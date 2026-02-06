@@ -100,6 +100,7 @@ namespace {
         void OnBackspace() {
             if (position > 0) {
                 buffer[--position] = '\0';
+                Log::putcSafe('\b');
             }
         }
 
@@ -167,7 +168,6 @@ namespace {
                     case VK_RETURN: c = '\n'; break;
                     case VK_BACK:
                         OnBackspace();
-                        Log::putcSafe('\b');
                         break;
                     default: break;
                 }
