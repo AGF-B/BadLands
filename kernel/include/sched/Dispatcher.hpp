@@ -16,5 +16,4 @@
 
 namespace Scheduling {
     void InitializeDispatcher();
-    uint8_t GetSoftwareInterruptVector();
 }
