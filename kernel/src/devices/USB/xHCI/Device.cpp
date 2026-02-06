@@ -1529,8 +1529,10 @@ namespace Devices::USB::xHCI {
             }
         }
 
+        bool drivers_initialized = false;
+
         // choose first configuration with known function that can be configured
-        for (size_t i = 0; i < descriptor.configurationsNumber; ++i) {
+        for (size_t i = 0; i < descriptor.configurationsNumber && !drivers_initialized; ++i) {
             if (configurations[i].valid) {
                 for (FunctionDescriptor* function = configurations[i].functions; function != nullptr; function = function->next) {
                     if (function->functionClass == HID::Driver::GetClassCode()) {
@@ -1554,6 +1556,8 @@ namespace Devices::USB::xHCI {
 
                                 pdev->Release();
                             }
+
+                            drivers_initialized = true;
                         }
                         else {
                             if constexpr (Debug::DEBUG_USB_SOFT_ERRORS) {
