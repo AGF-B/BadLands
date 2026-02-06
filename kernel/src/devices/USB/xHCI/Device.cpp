@@ -1348,6 +1348,26 @@ namespace Devices::USB::xHCI {
         return Optional<Driver*>();
     }
 
+    void Device::ReleaseDrivers() {
+        DriversNode* node = drivers;
+
+        while (node != nullptr) {
+            for (size_t i = 0; i < DriversNode::MAX_DRIVERS; ++i) {
+                if (node->drivers[i] != nullptr) {
+                    node->drivers[i]->Release();
+                    node->drivers[i] = nullptr;
+                }
+            }
+
+            DriversNode* next = node->next;
+            node->next = nullptr;
+            Heap::Free(node);
+            node = next;
+        }
+
+        drivers = nullptr;
+    }
+
     Device::Device(Controller& controller, const DeviceInformation& information)
         : controller{controller}, information{information} {}
 
@@ -1622,6 +1642,8 @@ namespace Devices::USB::xHCI {
                 endpoint_transfer_rings[i] = nullptr;
             }
         }
+
+        ReleaseDrivers();
 
         current_accesses.store(0);
         unavailable.store(true);

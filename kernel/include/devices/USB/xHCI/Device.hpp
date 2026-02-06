@@ -278,6 +278,7 @@ namespace Devices {
 
                 Success AddDriver(USB::Driver* driver);
                 Optional<USB::Driver*> FindDriverEvent(const TransferEventTRB& trb) const;
+                void ReleaseDrivers();
 
             public:
                 Device(Controller& controller, const DeviceInformation& information);
