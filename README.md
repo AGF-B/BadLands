@@ -19,6 +19,8 @@ If not, see <https://www.gnu.org/licenses/>.
 This is an experimental operating system I am currently working on. It is written in C++ with some C and x86-64 assembly code.
 The operating system targets UEFI-compatible x86-64 platforms.
 
+Made in Switzerland 🇨🇭
+
 ## Dependencies
 
 The listed versions are the ones I am currently using, feel free to use older or newer versions if they work.
