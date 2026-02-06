@@ -22,7 +22,8 @@
 #include <shared/LockGuard.hpp>
 #include <shared/Response.hpp>
 
-#include <devices/USB/HID/Device.hpp>
+#include <devices/USB/HID/Driver.hpp>
+#include <devices/USB/MassStorage/Device.hpp>
 #include <devices/USB/xHCI/Controller.hpp>
 #include <devices/USB/xHCI/Device.hpp>
 #include <devices/USB/xHCI/Specification.hpp>
@@ -581,11 +582,11 @@ namespace Devices::USB::xHCI {
         return Success();
     }
 
-    TransferRing* Device::GetEndpointTransferRing(Device& device, uint8_t endpointAddress, bool input) {
+    TransferRing* Device::GetEndpointTransferRing(uint8_t endpointAddress, bool input) const {
         const uint8_t ep_index = endpointAddress * 2 + (input ? 1 : 0) - 2;
 
         if (ep_index < MAX_ENDPOINT_TRANSFER_RINGS) {
-            return device.endpoint_transfer_rings[ep_index];
+            return endpoint_transfer_rings[ep_index];
         }
 
         return nullptr;
@@ -1285,15 +1286,66 @@ namespace Devices::USB::xHCI {
         return Optional<DeviceSpecificDescriptor*>(descriptor);
     }
 
-    Device::Device(const Device& device) : controller{device.controller}, information{device.information} {
-        this->context_wrapper = std::move(device.context_wrapper);
-        this->control_transfer_ring = std::move(device.control_transfer_ring);
-        this->descriptor = std::move(device.descriptor);
-        this->configurations = std::move(device.configurations);
+    void Device::RingDoorbell(uint8_t endpointIndex) const {
+        controller.RingDoorbell(*this, endpointIndex);
+    }
 
-        for (size_t i = 0; i < MAX_ENDPOINT_TRANSFER_RINGS; ++i) {
-            this->endpoint_transfer_rings[i] = std::move(device.endpoint_transfer_rings[i]);
+    Success Device::AddDriver(Driver* driver) {
+        DriversNode* prev = nullptr;
+        DriversNode* node = drivers;
+
+        while (node != nullptr) {
+            for (size_t i = 0; i < DriversNode::MAX_DRIVERS; ++i) {
+                if (node->drivers[i] == nullptr) {
+                    node->drivers[i] = driver;
+                    return Success();
+                }
+            }
+
+            prev = node;
+            node = node->next;
         }
+
+        node = reinterpret_cast<DriversNode*>(Heap::Allocate(sizeof(DriversNode)));
+
+        if (node == nullptr) {
+            return Failure();
+        }
+
+        node = new (node) DriversNode;
+
+        if (prev != nullptr) {
+            prev->next = node;
+        }
+        else {
+            drivers = node;
+        }
+
+        node->drivers[0] = driver;
+
+        return Success();
+    }
+
+    Optional<Driver*> Device::FindDriverEvent(const TransferEventTRB& trb) const {        
+        DriversNode* node = drivers;
+
+        while (node != nullptr) {
+            for (size_t i = 0; i < DriversNode::MAX_DRIVERS; ++i) {
+                Driver* driver = node->drivers[i];
+
+                if (driver != nullptr) {
+                    const auto address_wrapper = Paging::GetPhysicalAddress(driver->GetAwaitingTRB());
+
+                    if (address_wrapper.HasValue() && address_wrapper.GetValue() == trb.GetPointer()) {
+                        return Optional<Driver*>(driver);
+                    }
+                }
+            }
+
+            node = node->next;
+        }
+
+        return Optional<Driver*>();
     }
 
     Device::Device(Controller& controller, const DeviceInformation& information)
@@ -1307,13 +1359,13 @@ namespace Devices::USB::xHCI {
         return context_wrapper->GetOutputDeviceContextAddress();
     }
 
-    Optional<Device*> Device::Initialize() {
+    Success Device::Initialize() {
         if (!SetBusy().IsSuccess()) {
             if constexpr (Debug::DEBUG_USB_ERRORS) {
                 Log::printfSafe("[USB] Failed to set device %u as busy\r\n", information.slot_id);
             }
 
-            return Optional<Device*>();
+            return Failure();
         }
 
         if constexpr (Debug::DEBUG_USB_INFO) {
@@ -1328,7 +1380,7 @@ namespace Devices::USB::xHCI {
                 Log::printfSafe("[USB] Failed to create context wrapper for device %u\r\n", information.slot_id);
             }
 
-            return Optional<Device*>();
+            return Failure();
         }
 
         context_wrapper = context_wrapper_result.GetValue();
@@ -1351,7 +1403,7 @@ namespace Devices::USB::xHCI {
             }
 
             Release();
-            return Optional<Device*>();
+            return Failure();
         }
 
         control_transfer_ring = transfer_ring_result.GetValue();
@@ -1367,7 +1419,7 @@ namespace Devices::USB::xHCI {
             }
             
             Release();
-            return Optional<Device*>();
+            return Failure();
         }
 
         control_endpoint_context->SetEndpointType(EndpointType::ControlBidirectional);
@@ -1386,7 +1438,7 @@ namespace Devices::USB::xHCI {
             }
 
             Release();
-            return Optional<Device*>();
+            return Failure();
         }
 
         if constexpr (Debug::DEBUG_USB_INFO) {
@@ -1400,7 +1452,7 @@ namespace Devices::USB::xHCI {
             }
             
             Release();
-            return Optional<Device*>();
+            return Failure();
         }
 
         if constexpr (Debug::DEBUG_USB_INFO) {
@@ -1413,7 +1465,7 @@ namespace Devices::USB::xHCI {
             }
             
             Release();
-            return Optional<Device*>();
+            return Failure();
         }
 
         if constexpr (Debug::DEBUG_USB_INFO) {
@@ -1461,19 +1513,27 @@ namespace Devices::USB::xHCI {
         for (size_t i = 0; i < descriptor.configurationsNumber; ++i) {
             if (configurations[i].valid) {
                 for (FunctionDescriptor* function = configurations[i].functions; function != nullptr; function = function->next) {
-                    if (function->functionClass == HID::Device::GetClassCode()) {
+                    if (function->functionClass == HID::Driver::GetClassCode()) {
                         if constexpr (Debug::DEBUG_USB_INFO) {
                             Log::printfSafe("[USB] Found HID function in configuration %u\r\n", i);
                         }
 
-                        auto dev = HID::Device::Create(*this, configurations[i].configurationValue, function);
+                        auto dev = HID::Driver::Create(*this, configurations[i].configurationValue, function);
 
                         if (dev.HasValue()) {
                             if constexpr (Debug::DEBUG_USB_INFO) {
                                 Log::printfSafe("[USB] HID device created for device %u\r\n", information.slot_id);
                             }
 
-                            return Optional<Device*>(dev.GetValue());
+                            auto* const pdev = dev.GetValue();
+
+                            if (!AddDriver(pdev).IsSuccess()) {
+                                if constexpr (Debug::DEBUG_USB_SOFT_ERRORS) {
+                                    Log::printfSafe("[USB] Failed to add HID driver for device %u\r\n", information.slot_id);
+                                }
+
+                                pdev->Release();
+                            }
                         }
                         else {
                             if constexpr (Debug::DEBUG_USB_SOFT_ERRORS) {
@@ -1481,26 +1541,18 @@ namespace Devices::USB::xHCI {
                             }
                         }
                     }
+                    else if (function->functionClass == MassStorage::Device::GetClassCode()) {
+                        if constexpr (Debug::DEBUG_USB_INFO) {
+                            Log::printfSafe("[USB] Found Mass Storage function in configuration %u\n\r", i);
+                        }
+                    }
                 }
             }
         }
 
-        if constexpr (Debug::DEBUG_USB_INFO) {
-            Log::printfSafe("[USB] No suitable functions found for device %u\r\n", information.slot_id);
-        }
-
-        Device* ptr = reinterpret_cast<Device*>(Heap::Allocate(sizeof(Device)));
-
-        if (ptr == nullptr) {
-            Release();
-            return Optional<Device*>();
-        }
-
-        new (ptr) Device(*this);
-
         ReleaseBusy();
 
-        return Optional<Device*>(ptr);
+        return Success();
     }
 
     void Device::SetUnvailable() {
@@ -1575,6 +1627,24 @@ namespace Devices::USB::xHCI {
         unavailable.store(true);
     }
 
+    Success Device::PostInitialization() {
+        auto* node = drivers;
+
+        while (node != nullptr) {
+            for (size_t i = 0; i < DriversNode::MAX_DRIVERS; ++i) {
+                if (node->drivers[i] != nullptr) {
+                    if (!node->drivers[i]->PostInitialization().IsSuccess()) {
+                        return Failure();
+                    }
+                }
+            }
+
+            node = node->next;
+        }
+
+        return Success();
+    }
+
     void Device::Destroy() {
         SetUnvailable();
         Release();
@@ -1590,6 +1660,13 @@ namespace Devices::USB::xHCI {
         if (awaiting_transfer_address_wrapper.HasValue() && trb.GetPointer() == awaiting_transfer_address_wrapper.GetValue()) {
             transfer_result = trb;
             transfer_complete.store(true);
+        }
+        else {
+            auto driver_wrapper = FindDriverEvent(trb);
+
+            if (driver_wrapper.HasValue()) {
+                driver_wrapper.GetValue()->HandleEvent();
+            }
         }
 
         ReleaseBusy();

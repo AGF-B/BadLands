@@ -24,6 +24,8 @@
 
 namespace Devices {
     namespace USB {
+        class Driver;
+
         namespace xHCI {
             class Controller;
 
@@ -199,7 +201,6 @@ namespace Devices {
                 Optional<EndpointDescriptor> ParseEndpointDescriptor(const uint8_t*& data, const uint8_t* limit);
                 Optional<DeviceSpecificDescriptor*> ParseDeviceSpecificDescriptor(const uint8_t*& data, const uint8_t* limit);
 
-            protected:
                 Success InitiateTransfer(const TRB* trb, uint32_t reason);
 
                 static size_t GetDescriptorSize(const void* data);
@@ -247,11 +248,9 @@ namespace Devices {
 
                 static Success SetConfiguration(Device& device, uint8_t configuration_value);
                 static Success ConfigureEndpoint(Device& device, const EndpointDescriptor& endpoint);
-                static TransferRing* GetEndpointTransferRing(Device& device, uint8_t endpointAddress, bool input);
+                TransferRing* GetEndpointTransferRing(uint8_t endpointAddress, bool input) const;
 
                 static Optional<uint8_t> ConvertEndpointInterval(const Device& device, const EndpointType& type, uint16_t interval);
-
-                Device(const Device&);
                 
                 Utils::Lock                 state_lock;
                 Utils::SimpleAtomic<bool>   unavailable{false};
@@ -264,17 +263,33 @@ namespace Devices {
                 bool            IsBusy() const;
                 virtual void    Release();
 
+                void RingDoorbell(uint8_t doorbellID) const;
+
+                friend class USB::Driver;
+
+                struct DriversNode {
+                    static constexpr size_t MAX_DRIVERS = 7;
+
+                    DriversNode* next = nullptr;
+                    USB::Driver* drivers[MAX_DRIVERS] = { nullptr };
+                };
+
+                DriversNode* drivers = nullptr;
+
+                Success AddDriver(USB::Driver* driver);
+                Optional<USB::Driver*> FindDriverEvent(const TransferEventTRB& trb) const;
+
             public:
                 Device(Controller& controller, const DeviceInformation& information);
 
                 const DeviceInformation& GetInformation() const;
                 const void* GetOutputDeviceContext() const;
 
-                Optional<Device*> Initialize();
-                virtual inline Success PostInitialization() { return Success(); }
+                Success Initialize();
+                Success PostInitialization();
                 void Destroy();
 
-                virtual void SignalTransferComplete(const TransferEventTRB& trb);
+                void SignalTransferComplete(const TransferEventTRB& trb);
 
                 const DeviceDescriptor& GetDeviceDescriptor() const;
             };

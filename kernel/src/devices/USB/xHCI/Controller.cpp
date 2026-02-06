@@ -727,7 +727,7 @@ namespace Devices::USB::xHCI {
                             continue;
                         }
 
-                        auto generic_device = new (raw_device) Device(*this, DeviceInformation{
+                        auto device = new (raw_device) Device(*this, DeviceInformation{
                             .route_string = 0,
                             .parent_port = static_cast<uint8_t>(i + 1),
                             .root_hub_port = static_cast<uint8_t>(i + 1),
@@ -737,25 +737,19 @@ namespace Devices::USB::xHCI {
                         });
 
                         auto& pdevice = devices[slot_id - 1];
+                        pdevice = device;
 
-                        pdevice = generic_device;
-
-                        auto device = generic_device->Initialize();
-
-                        Heap::Free(raw_device);
-
-                        if (!device.HasValue()) {
+                        if (!device->Initialize().IsSuccess()) {
                             if constexpr (Debug::DEBUG_USB_SOFT_ERRORS) {
                                 Log::printfSafe("[xHCI] Failed to initialize device on port 0x%0.2hhx\n\r", i);
                             }
 
+                            Heap::Free(pdevice);
+                            pdevice = nullptr;
                             DisableSlot(ports[i].slot);
                             ports[i].slot = 0;
                         }
-
-                        pdevice = device.GetValue();
-
-                        if (!pdevice->PostInitialization().IsSuccess()) {
+                        else if (!pdevice->PostInitialization().IsSuccess()) {
                             if constexpr (Debug::DEBUG_USB_SOFT_ERRORS) {
                                 Log::printfSafe("[xHCI] Post-initialization failed for device on port 0x%0.2hhx\n\r", i);
                             }

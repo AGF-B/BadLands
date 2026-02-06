@@ -19,6 +19,7 @@
 
 #include <shared/Response.hpp>
 
+#include <devices/USB/Driver.hpp>
 #include <devices/USB/xHCI/Device.hpp>
 #include <devices/USB/xHCI/Specification.hpp>
 #include <devices/USB/xHCI/TRB.hpp>
@@ -33,7 +34,7 @@ namespace Devices {
 
             class InterfaceDevice;
 
-            class Device : public xHCI::Device {
+            class Driver : public USB::Driver {
             public:
                 struct HIDDescriptor {
                     static inline constexpr size_t DESCRIPTOR_SIZE = 9;
@@ -76,20 +77,20 @@ namespace Devices {
 
                 static inline constexpr uint8_t HID_REPORT_DESCRIPTOR_TYPE = 0x22;
 
-                const FunctionDescriptor* function = nullptr;
+                const xHCI::Device::FunctionDescriptor* function = nullptr;
                 HIDHierarchy hierarchy;
                 uint8_t interrupt_in_ep_address = 0;
                 xHCI::TransferRing* endpoint_ring = nullptr;
                 uint8_t* reportBuffer = nullptr;
                 const xHCI::TRB* last_sent_trb = nullptr;
 
-                Device(const xHCI::Device& device, const FunctionDescriptor* function, const HIDHierarchy& hierarchy, uint8_t* buffer);
+                Driver(const xHCI::Device& device, const xHCI::Device::FunctionDescriptor* function, const HIDHierarchy& hierarchy, uint8_t* buffer);
 
                 void InitiateTransaction();
 
                 void SoftRelease();
                 
-                static Optional<HIDDescriptor> GetHIDDescriptor(InterfaceDescriptor* interface);
+                static Optional<HIDDescriptor> GetHIDDescriptor(xHCI::Device::InterfaceDescriptor* interface);
                 static Optional<HIDDescriptor> ParseHIDDescriptor(const uint8_t* data, size_t length);
 
                 void HandleTransactionComplete();
@@ -196,13 +197,11 @@ namespace Devices {
 
                 static inline constexpr uint8_t GetClassCode() { return 0x03; }
                 
-                static Optional<Device*> Create(xHCI::Device& device, uint8_t configuration_value, const FunctionDescriptor* function);
+                static Optional<Driver*> Create(xHCI::Device& device, uint8_t configuration_value, const xHCI::Device::FunctionDescriptor* function);
 
-                virtual Success PostInitialization() override;
-
-                virtual void SignalTransferComplete(const xHCI::TransferEventTRB& trb) override;
-
-            protected:
+                virtual const xHCI::TRB* GetAwaitingTRB() const override;
+                virtual void HandleEvent() override;
+                virtual Success PostInitialization() override;                
                 virtual void Release() override;
             };
 
@@ -212,8 +211,8 @@ namespace Devices {
 
             public:
                 struct HIDState {
-                    const Device::ReportParser::GlobalState& globalState;
-                    const Device::ReportParser::LocalState& localState;
+                    const Driver::ReportParser::GlobalState& globalState;
+                    const Driver::ReportParser::LocalState& localState;
                 };
 
                 struct IOConfiguration {

@@ -19,7 +19,7 @@
 
 #include <shared/Response.hpp>
 
-#include <devices/USB/HID/Device.hpp>
+#include <devices/USB/HID/Driver.hpp>
 
 namespace Devices {
     namespace USB {

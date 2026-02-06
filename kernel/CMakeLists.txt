@@ -36,7 +36,8 @@ add_library(KERNEL_SVC OBJECT
 )
 
 add_library(xHCI_USB OBJECT
-    "src/devices/USB/HID/Device.cpp"
+    "src/devices/USB/Driver.cpp"
+    "src/devices/USB/HID/Driver.cpp"
     "src/devices/USB/HID/Keyboard.cpp"
     "src/devices/USB/xHCI/Controller.cpp"
     "src/devices/USB/xHCI/Device.cpp"
