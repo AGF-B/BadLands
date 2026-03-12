@@ -623,7 +623,8 @@ namespace Devices::USB::HID {
             static_cast<uint16_t>((static_cast<uint16_t>(HID_REPORT_DESCRIPTOR_TYPE) << 8) | 0),
             static_cast<uint16_t>(interface->interfaceNumber),
             hid_descriptor.reportDescriptorLength,
-            buffer
+            buffer,
+            nullptr
         ).IsSuccess()) {
             if constexpr (Debug::DEBUG_HID_ERRORS) {
                 Log::printfSafe("[HID] Failed to fetch report descriptor from device\n\r");
@@ -758,7 +759,7 @@ namespace Devices::USB::HID {
         return Success();
     }
 
-    void Driver::HandleEvent() {
+    void Driver::HandleEvent([[maybe_unused]] const xHCI::TransferEventTRB& trb) {
         HandleTransactionComplete();
         InitiateTransaction();
     }

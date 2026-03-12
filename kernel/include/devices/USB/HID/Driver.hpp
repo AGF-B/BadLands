@@ -82,7 +82,7 @@ namespace Devices {
                 uint8_t interrupt_in_ep_address = 0;
                 xHCI::TransferRing* endpoint_ring = nullptr;
                 uint8_t* reportBuffer = nullptr;
-                const xHCI::TRB* last_sent_trb = nullptr;
+                const xHCI::TRB* volatile last_sent_trb = nullptr;
 
                 Driver(const xHCI::Device& device, const xHCI::Device::FunctionDescriptor* function, const HIDHierarchy& hierarchy, uint8_t* buffer);
 
@@ -200,7 +200,7 @@ namespace Devices {
                 static Optional<Driver*> Create(xHCI::Device& device, uint8_t configuration_value, const xHCI::Device::FunctionDescriptor* function);
 
                 virtual const xHCI::TRB* GetAwaitingTRB() const override;
-                virtual void HandleEvent() override;
+                virtual void HandleEvent(const xHCI::TransferEventTRB& trb) override;
                 virtual Success PostInitialization() override;                
                 virtual void Release() override;
             };
