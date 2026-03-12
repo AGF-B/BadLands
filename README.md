@@ -139,7 +139,7 @@ Again, check it has execute permissions in case of failure. If any other error a
     - [x] Key Events
     - [ ] LEDs Dispatch
 - [ ] Generic USB Devices
-  - [ ] Mass Storage
+  - [x] Mass Storage
   - [ ] Hubs
   - [ ] Ethernet Modules
 - [ ] Non-USB Storage Drivers
