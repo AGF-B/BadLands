@@ -153,7 +153,13 @@ namespace Devices::USB::xHCI {
                 case EventTRB::Type::TransferEvent: {
                     const auto& transfer_event = *reinterpret_cast<TransferEventTRB*>(event);
                     const uint8_t slot_id = transfer_event.GetSlotID();
-                    devices[slot_id - 1]->SignalTransferComplete(transfer_event);
+                    
+                    const auto& device = devices[slot_id - 1];
+
+                    if (device != nullptr) {
+                        device->SignalTransferComplete(transfer_event);
+                    }
+                    
                     break;
                 }
                 case EventTRB::Type::CommandCompletionEvent: {
@@ -645,8 +651,9 @@ namespace Devices::USB::xHCI {
 
                         if (slot != 0) {
                             if (devices[slot - 1] != nullptr) {
-                                devices[slot - 1]->Destroy();
+                                auto* const device = devices[slot - 1];
                                 devices[slot - 1] = nullptr;
+                                device->Destroy();
                             }
 
                             DisableSlot(slot);
