@@ -629,7 +629,9 @@ namespace Devices::USB::xHCI {
     }
 
     void TransferRing::Release() {
-        VirtualMemory::FreeDMA(base, (capacity * sizeof(TransferTRB)));
+        const size_t allocated_pages = (capacity * sizeof(TransferTRB) + Shared::Memory::PAGE_SIZE - 1) / Shared::Memory::PAGE_SIZE;
+        VirtualMemory::FreeDMA(base, allocated_pages);
+        Heap::Free(this);
     }
 
     bool TransferRing::GetCycle() const {
