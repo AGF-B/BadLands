@@ -54,7 +54,7 @@ namespace Utils {
     template<atomic_t T, MemoryOrder Order = MemoryOrder::SEQ_CST>
     class SimpleAtomic {
     private:
-        T atomic_value;
+        volatile T atomic_value;
         
         SimpleAtomic(const SimpleAtomic&) = delete;
         SimpleAtomic(SimpleAtomic&&) = delete;
