@@ -27,6 +27,14 @@ namespace Devices {
         private:
             const xHCI::Device& device;
 
+            inline Success SetBusy() {
+                return device.SetBusy();
+            }
+
+            inline void ReleaseBusy() {
+                device.ReleaseBusy();
+            }
+
         protected:
             static inline const decltype(xHCI::Device::SendRequest)& SendRequest = xHCI::Device::SendRequest;
             static inline const decltype(xHCI::Device::SetConfiguration)& SetConfiguration = xHCI::Device::SetConfiguration;
@@ -35,11 +43,30 @@ namespace Devices {
             virtual xHCI::TransferRing* GetEndpointTransferRing(uint8_t endpointAddress, bool isIn) const final;
             virtual void RingDoorbell(uint8_t doorbellID) const final;
 
+            struct ContextBusy {
+                Driver& driver;
+                bool valid = false;
+
+                inline ContextBusy(Driver* _driver) : driver{*_driver} {
+                    valid = driver.SetBusy().IsSuccess();
+                }
+
+                inline ~ContextBusy() {
+                    if (valid) {
+                        driver.ReleaseBusy();
+                    }
+                }
+
+                inline bool IsValid() const {
+                    return valid;
+                }
+            };
+
         public:
             Driver(const xHCI::Device& device);
 
             virtual const xHCI::TRB* GetAwaitingTRB() const = 0;
-            virtual void HandleEvent() = 0;
+            virtual void HandleEvent(const xHCI::TransferEventTRB& trb) = 0;
             virtual Success PostInitialization() = 0;
             virtual void Release() = 0;
         };
