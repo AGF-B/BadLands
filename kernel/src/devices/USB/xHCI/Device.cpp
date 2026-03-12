@@ -23,7 +23,7 @@
 #include <shared/Response.hpp>
 
 #include <devices/USB/HID/Driver.hpp>
-#include <devices/USB/MassStorage/Device.hpp>
+#include <devices/USB/MassStorage/Driver.hpp>
 #include <devices/USB/xHCI/Controller.hpp>
 #include <devices/USB/xHCI/Device.hpp>
 #include <devices/USB/xHCI/Specification.hpp>
@@ -331,7 +331,8 @@ namespace Devices::USB::xHCI {
         uint16_t wValue,
         uint16_t wIndex,
         uint16_t wLength,
-        uint8_t* buffer
+        uint8_t* buffer,
+        TRB::CompletionCode* status_code
     ) {
         Utils::LockGuard _{device.transfer_lock};
 
@@ -386,11 +387,21 @@ namespace Devices::USB::xHCI {
 
         const auto* ptr = device.control_transfer_ring->Enqueue(status);
 
-        if (!device.InitiateTransfer(ptr, 1).IsSuccess() || device.transfer_result.GetCompletionCode() != TRB::CompletionCode::Success) {
+        if (!device.InitiateTransfer(ptr, 1).IsSuccess()) {
+            if (status_code != nullptr) {
+                *status_code = TRB::CompletionCode::Invalid;
+            }
+
             return Failure();
         }
 
-        return Success();
+        const auto completion_code = device.transfer_result.GetCompletionCode();
+
+        if (status_code != nullptr) {
+            *status_code = completion_code;
+        }
+
+        return completion_code == TRB::CompletionCode::Success ? Success() : Failure();
     }
 
     Optional<uint8_t*> Device::GetDescriptor(uint8_t type, uint8_t index, uint8_t languageID) {
@@ -429,7 +440,8 @@ namespace Devices::USB::xHCI {
             static_cast<uint16_t>((static_cast<uint16_t>(type) << 8) | index),
             static_cast<uint16_t>(languageID),
             static_cast<uint16_t>(length),
-            buffer
+            buffer,
+            nullptr
         );
     }
 
@@ -477,27 +489,28 @@ namespace Devices::USB::xHCI {
         static constexpr uint8_t REQUEST_TYPE = 0x00;
         static constexpr uint8_t REQUEST_SET_CONFIGURATION = 9;
 
-        return SendRequest(
-            device,
-            REQUEST_TYPE,
-            REQUEST_SET_CONFIGURATION,
-            static_cast<uint16_t>(configuration_value),
-            0,
-            0,
-            nullptr
-        );
+        if (static_cast<int16_t>(configuration_value) != device.current_configuration) {
+            if (!SendRequest(
+                device,
+                REQUEST_TYPE,
+                REQUEST_SET_CONFIGURATION,
+                static_cast<uint16_t>(configuration_value),
+                0,
+                0,
+                nullptr,
+                nullptr
+            ).IsSuccess()) {
+                return Failure();
+            }
+
+            device.current_configuration = configuration_value;
+        }
+
+        return Success();
     }
 
     Success Device::ConfigureEndpoint(Device& device, const EndpointDescriptor& endpoint) {
         auto& context_wrapper = device.context_wrapper;
-
-        if (endpoint.superSpeedConfig.valid) {
-            if constexpr (Debug::DEBUG_USB_WARNINGS) {
-                Log::putsSafe("[USB] SuperSpeed endpoints are not yet supported\n\r");
-            }
-
-            return Failure();
-        }
 
         const auto& type = endpoint.endpointType;
 
@@ -552,7 +565,7 @@ namespace Devices::USB::xHCI {
 
         auto* const ep_context = context_wrapper->GetInputEndpointContext(endpoint.endpointAddress - 1, is_in);
         ep_context->Reset();
-        ep_context->SetMult(0);
+        ep_context->SetMult(endpoint.superSpeedConfig.valid ? endpoint.superSpeedConfig.mult : 0);
         ep_context->SetMaxPStreams(0);
         ep_context->SetInterval(interval.GetValue());
         ep_context->SetErrorCount(MAX_ERRORS);
@@ -1211,9 +1224,14 @@ namespace Devices::USB::xHCI {
                 case EndpointType::BulkIn:
                 case EndpointType::BulkOut:
                     superSpeedConfig.maxStreams = (attributes & MAX_STREAMS_MASK);
+
                     if (superSpeedConfig.maxStreams > 0) {
                         superSpeedConfig.maxStreams = 1U << superSpeedConfig.maxStreams;
                     }
+
+                    superSpeedConfig.mult = 0;
+                    superSpeedConfig.bytesPerInterval = 0;
+
                     break;
                 case EndpointType::IsochronousIn:
                 case EndpointType::IsochronousOut:
@@ -1230,7 +1248,12 @@ namespace Devices::USB::xHCI {
                         }
 
                         superSpeedConfig.bytesPerInterval = *reinterpret_cast<const uint32_t*>(&data[4]);
-                        superSpeedConfig.maxPacketsPerInterval = (superSpeedConfig.bytesPerInterval + maxPacketSize - 1) / maxPacketSize;
+
+                        superSpeedConfig.mult = (superSpeedConfig.maxBurst == 0)
+                            ? 0
+                            : (superSpeedConfig.bytesPerInterval / ((superSpeedConfig.maxBurst) * maxPacketSize));
+
+                        superSpeedConfig.maxPacketsPerInterval = (superSpeedConfig.mult + 1) * (superSpeedConfig.maxBurst + 1);
                     }
                     else {
                         superSpeedConfig.maxPacketsPerInterval = ((attributes & MULT_MASK) + 1) * (superSpeedConfig.maxBurst + 1);
@@ -1540,21 +1563,21 @@ namespace Devices::USB::xHCI {
                             Log::printfSafe("[USB] Found HID function in configuration %u\r\n", i);
                         }
 
-                        auto dev = HID::Driver::Create(*this, configurations[i].configurationValue, function);
+                        auto drv = HID::Driver::Create(*this, configurations[i].configurationValue, function);
 
-                        if (dev.HasValue()) {
+                        if (drv.HasValue()) {
                             if constexpr (Debug::DEBUG_USB_INFO) {
                                 Log::printfSafe("[USB] HID device created for device %u\r\n", information.slot_id);
                             }
 
-                            auto* const pdev = dev.GetValue();
+                            auto* const pdrv = drv.GetValue();
 
-                            if (!AddDriver(pdev).IsSuccess()) {
+                            if (!AddDriver(pdrv).IsSuccess()) {
                                 if constexpr (Debug::DEBUG_USB_SOFT_ERRORS) {
                                     Log::printfSafe("[USB] Failed to add HID driver for device %u\r\n", information.slot_id);
                                 }
 
-                                pdev->Release();
+                                pdrv->Release();
                             }
 
                             drivers_initialized = true;
@@ -1565,9 +1588,34 @@ namespace Devices::USB::xHCI {
                             }
                         }
                     }
-                    else if (function->functionClass == MassStorage::Device::GetClassCode()) {
+                    else if (function->functionClass == MassStorage::Driver::GetClassCode()) {
                         if constexpr (Debug::DEBUG_USB_INFO) {
                             Log::printfSafe("[USB] Found Mass Storage function in configuration %u\n\r", i);
+                        }
+
+                        auto drv = MassStorage::Driver::Create(*this, configurations[i].configurationValue, function);
+
+                        if (drv.HasValue()) {
+                            if constexpr (Debug::DEBUG_USB_INFO) {
+                                Log::printfSafe("[USB] Mass Storage device created for device %u\r\n", information.slot_id);
+                            }
+
+                            auto* const pdrv = drv.GetValue();
+
+                            if (!AddDriver(pdrv).IsSuccess()) {
+                                if constexpr (Debug::DEBUG_USB_SOFT_ERRORS) {
+                                    Log::printfSafe("[USB] Failed to add Mass Storage driver for device %u\r\n", information.slot_id);
+                                }
+
+                                pdrv->Release();
+                            }
+
+                            drivers_initialized = true;
+                        }
+                        else {
+                            if constexpr (Debug::DEBUG_USB_SOFT_ERRORS) {
+                                Log::printfSafe("[USB] Failed to initialize Mass Storage device for device %u\r\n", information.slot_id);
+                            }
                         }
                     }
                 }
@@ -1596,7 +1644,7 @@ namespace Devices::USB::xHCI {
         return unavailable.load();
     }
 
-    Success Device::SetBusy() {
+    Success Device::SetBusy() const {
         Utils::LockGuard _{state_lock};
 
         if (unavailable.load()) {
@@ -1608,7 +1656,7 @@ namespace Devices::USB::xHCI {
         return Success();
     }
 
-    void Device::ReleaseBusy() {
+    void Device::ReleaseBusy() const {
         Utils::LockGuard _{state_lock};
 
         if (current_accesses > 0) {
@@ -1654,12 +1702,17 @@ namespace Devices::USB::xHCI {
     }
 
     Success Device::PostInitialization() {
+        if (!SetBusy().IsSuccess()) {
+            return Failure();
+        }
+
         auto* node = drivers;
 
         while (node != nullptr) {
             for (size_t i = 0; i < DriversNode::MAX_DRIVERS; ++i) {
                 if (node->drivers[i] != nullptr) {
                     if (!node->drivers[i]->PostInitialization().IsSuccess()) {
+                        ReleaseBusy();
                         return Failure();
                     }
                 }
@@ -1667,6 +1720,8 @@ namespace Devices::USB::xHCI {
 
             node = node->next;
         }
+
+        ReleaseBusy();
 
         return Success();
     }
@@ -1691,7 +1746,7 @@ namespace Devices::USB::xHCI {
             auto driver_wrapper = FindDriverEvent(trb);
 
             if (driver_wrapper.HasValue()) {
-                driver_wrapper.GetValue()->HandleEvent();
+                driver_wrapper.GetValue()->HandleEvent(trb);
             }
         }
 

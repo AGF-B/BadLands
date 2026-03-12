@@ -113,6 +113,7 @@ namespace Devices {
                     typedef struct {
                         bool valid;
                         uint8_t maxBurst;
+                        uint8_t mult;
                         uint32_t bytesPerInterval;
                         union {
                             uint32_t maxStreams;
@@ -223,7 +224,7 @@ namespace Devices {
 
                 Utils::Lock transfer_lock;
                 Utils::SimpleAtomic<bool> transfer_complete{false};
-                const TRB* awaiting_transfer = nullptr;
+                const TRB* volatile awaiting_transfer = nullptr;
                 TransferEventTRB transfer_result;
 
                 DeviceDescriptor descriptor;
@@ -232,6 +233,8 @@ namespace Devices {
                 static constexpr size_t MAX_ENDPOINT_TRANSFER_RINGS = 15 * 2;
                 TransferRing* endpoint_transfer_rings[MAX_ENDPOINT_TRANSFER_RINGS] = { nullptr };
 
+                int16_t current_configuration = -1;
+
                 static Success SendRequest(
                     Device& device,
                     uint8_t bmRequestType,
@@ -239,7 +242,8 @@ namespace Devices {
                     uint16_t wValue,
                     uint16_t wIndex,
                     uint16_t wLength,
-                    uint8_t* buffer
+                    uint8_t* buffer,
+                    TRB::CompletionCode* status_code
                 );
 
                 Optional<uint8_t*> GetDescriptor(uint8_t type, uint8_t index, uint8_t languageID = 0);
@@ -252,14 +256,14 @@ namespace Devices {
 
                 static Optional<uint8_t> ConvertEndpointInterval(const Device& device, const EndpointType& type, uint16_t interval);
                 
-                Utils::Lock                 state_lock;
-                Utils::SimpleAtomic<bool>   unavailable{false};
-                Utils::SimpleAtomic<size_t> current_accesses{0};
+                mutable Utils::Lock                 state_lock;
+                mutable Utils::SimpleAtomic<bool>   unavailable{false};
+                mutable Utils::SimpleAtomic<size_t> current_accesses{0};
 
                 void            SetUnvailable();
                 bool            IsUnavailable() const;
-                Success         SetBusy();
-                void            ReleaseBusy();
+                Success         SetBusy() const;
+                void            ReleaseBusy() const;
                 bool            IsBusy() const;
                 virtual void    Release();
 
