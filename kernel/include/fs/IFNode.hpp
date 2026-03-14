@@ -55,6 +55,7 @@ namespace FS {
         virtual Status              AddNode(const DirectoryEntry& fileref, IFNode* node) = 0;
         virtual Status              Remove(const DirectoryEntry& fileref) = 0;
         virtual Response<size_t>    List(DirectoryEntry* list, size_t length, size_t from = 0) = 0;
+        virtual bool                IsDirectory() const = 0;
 
         virtual Response<size_t>    Read(size_t offset, size_t count, uint8_t* buffer) = 0;
         virtual Response<size_t>    Write(size_t offset, size_t count, const uint8_t* buffer) = 0;
@@ -73,6 +74,8 @@ namespace FS {
     public:
         explicit Directory(Owner* owner);
 
+        virtual bool                IsDirectory() const final;
+
         virtual Response<size_t>    Read(size_t offset, size_t count, uint8_t* buffer) final;
         virtual Response<size_t>    Write(size_t offset, size_t count, const uint8_t* buffer) final;
     };
@@ -86,5 +89,6 @@ namespace FS {
         virtual Status			    AddNode(const DirectoryEntry& fileref, IFNode* node) final;
         virtual Status			    Remove(const DirectoryEntry& fileref) final;
         virtual Response<size_t>	List(DirectoryEntry* list, size_t length, size_t from = 0) final;
+        virtual bool                IsDirectory() const final;
     };
 }

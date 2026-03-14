@@ -50,6 +50,10 @@ namespace FS {
 
     Directory::Directory(Owner* owner) : IFNode(owner) {}
 
+    bool Directory::IsDirectory() const {
+        return true;
+    }
+
     Response<size_t> Directory::Read([[maybe_unused]] size_t offset, [[maybe_unused]] size_t count, [[maybe_unused]] uint8_t* buffer) {
         return Response<size_t>(Status::UNSUPPORTED);
     }
@@ -78,5 +82,9 @@ namespace FS {
 
     Response<size_t> File::List([[maybe_unused]] DirectoryEntry* list, [[maybe_unused]] size_t length, [[maybe_unused]] size_t from) {
         return Response<size_t>(Status::UNSUPPORTED);
+    }
+
+    bool File::IsDirectory() const {
+        return false;
     }
 }
