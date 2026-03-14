@@ -48,7 +48,110 @@ namespace {
         size_t length;
     };
 
-    typedef void (*ExecuteCallback)(const CommandString&);
+    class CommandContext {
+    private:
+        static constexpr size_t DEFAULT_PATH_BUFFER_SIZE = 256;
+
+        char* displayedPath = nullptr;
+        size_t displayedPathLength = 0;
+        size_t displayedPathCapacity = 0;
+        FS::IFNode* currentDirectory = nullptr;
+
+    public:
+        static Optional<CommandContext> Create() {
+            char* displayedPath = static_cast<char*>(Heap::Allocate(DEFAULT_PATH_BUFFER_SIZE));
+
+            if (displayedPath == nullptr) {
+                return Optional<CommandContext>();
+            }
+
+            Utils::memset(displayedPath, 0, DEFAULT_PATH_BUFFER_SIZE);
+            Utils::memcpy(displayedPath, "//", 2);
+
+            auto rootResponse = Kernel::Exports.vfs->Open(FS::DirectoryEntry {
+                .NameLength = 2,
+                .Name = "//"
+            });
+
+            if (rootResponse.CheckError()) {
+                Heap::Free(displayedPath);
+                return Optional<CommandContext>();
+            }
+
+            CommandContext context;
+
+            context.displayedPath = displayedPath;
+            context.displayedPathLength = 3;
+            context.displayedPathCapacity = DEFAULT_PATH_BUFFER_SIZE;
+            context.currentDirectory = rootResponse.GetValue();
+
+            return Optional(context);
+        }
+
+        const char* GetDisplayedPath() const {
+            return displayedPath;
+        }
+
+        FS::IFNode* GetCurrentDirectory() const {
+            return currentDirectory;
+        }
+
+        void OpenSubdirectory(FS::IFNode* newDirectory, const char* addedPath, size_t addedPathLength) {
+            if (newDirectory != nullptr && addedPath != nullptr && addedPathLength > 0) {
+                currentDirectory = newDirectory;
+
+                // +1 for the '/' character
+                if (displayedPathLength + addedPathLength + 1 > displayedPathCapacity) {
+                    size_t newCapacity = displayedPathCapacity + addedPathLength * 5;
+
+                    char* newBuffer = static_cast<char*>(Heap::Allocate(newCapacity));
+
+                    if (newBuffer != nullptr) {
+                        Utils::memset(newBuffer, 0, newCapacity);
+                        Utils::memcpy(newBuffer, displayedPath, displayedPathLength);
+                        Heap::Free(displayedPath);
+                        displayedPath = newBuffer;
+                        displayedPathCapacity = newCapacity;
+                    }
+                    else {
+                        Panic::PanicShutdown("[SHELL] Failed to allocate memory for command context path buffer expansion\n\r");
+                    }
+                }
+
+                Utils::memcpy(displayedPath + displayedPathLength - 1, addedPath, addedPathLength);
+
+                displayedPathLength += addedPathLength + 1;     // +1 for the '/' character
+                displayedPath[displayedPathLength - 2] = '/';   // see below for the explanation of the -2
+                displayedPath[displayedPathLength - 1] = '\0';  // -1 because length already accounts for null-terminator
+            }
+        }
+
+        void OpenParentDirectory() {
+            if (currentDirectory != nullptr) {
+                FS::DirectoryEntry filename;
+
+                auto parentResponse = Kernel::Exports.vfs->OpenParent(FS::DirectoryEntry {
+                    .NameLength = displayedPathLength - 1,
+                    .Name = displayedPath
+                }, filename);
+
+                if (parentResponse.CheckError()) {
+                    Log::putsSafe("[SHELL] Failed to open parent directory\n\r");
+                }
+                else {
+                    currentDirectory = parentResponse.GetValue();
+                }
+
+                if (filename.NameLength > 0) {
+                    // We are not in the root directory, so we can trim the displayed path
+                    displayedPathLength -= filename.NameLength + 1; // +1 for the '/' character
+                    displayedPath[displayedPathLength - 1] = '\0'; // -1 because length already accounts for null-terminator
+                }
+            }            
+        }
+    };
+
+    typedef void (*ExecuteCallback)(const CommandString&, CommandContext&);
     typedef Devices::KeyboardDispatcher::VirtualKeyPacket KeyPacket;
 
     class InputBuffer final {
@@ -58,6 +161,7 @@ namespace {
         size_t position = 0;
 
         ExecuteCallback executeCallback = nullptr;
+        CommandContext& context;
 
         void AppendChar(char c) {
             if (!IsOverflowing()) {
@@ -73,7 +177,7 @@ namespace {
         }
         
     public:
-        explicit InputBuffer(size_t size) : capacity{size} {
+        explicit InputBuffer(size_t size, CommandContext& context) : capacity{size}, context{context} {
             buffer = static_cast<char*>(Heap::Allocate(size));
 
             if (buffer != nullptr) {
@@ -106,6 +210,11 @@ namespace {
 
         void SetExecuteCallback(const ExecuteCallback& callback) {
             executeCallback = callback;
+        }
+
+        void DisplayPrompt() const {
+            Log::putsSafe(context.GetDisplayedPath());
+            Log::putsSafe("> ");
         }
 
         void OnKeyEvent(const KeyPacket& pkt) {
@@ -164,6 +273,9 @@ namespace {
                     case VK_7: c = shift ? '&' : '7'; break;
                     case VK_8: c = shift ? '*' : '8'; break;
                     case VK_9: c = shift ? '(' : '9'; break;
+                    case VK_OEM_PERIOD: c = shift ? '>' : '.'; break;
+                    case VK_OEM_COMMA: c = shift ? '<' : ','; break;
+                    case VK_OEM_2: c = shift ? '?' : '/'; break; 
                     case VK_SPACE: c = ' '; break;
                     case VK_RETURN: c = '\n'; break;
                     case VK_BACK:
@@ -184,13 +296,13 @@ namespace {
                     }
                     else {
                         if (executeCallback != nullptr) {
-                            executeCallback(GetCommandString());
+                            executeCallback(GetCommandString(), context);
                         }
                     }
 
                     Clear();
 
-                    Log::putsSafe("> ");
+                    DisplayPrompt();
                 }
             }
         }
@@ -203,16 +315,101 @@ namespace {
         }
     };
 
-    void OnExecute(const CommandString& cmd) {
+    void OnExecute(const CommandString& cmd, CommandContext& context) {
         const char* const cmd_string = cmd.command;
 
-        if (cmd.length == 5 && Utils::memcmp(cmd_string, "clear", 5) == 0) {
-            Log::clear();
-        }
-        else {
-            Log::putsSafe("[SHELL] Unknown command: ");
-            Log::putsSafe(cmd_string);
-            Log::putsSafe("\n\r");
+        if (cmd.length > 0) {
+            if (cmd.length == 5 && Utils::memcmp(cmd_string, "clear", 5) == 0) {
+                Log::clear();
+            }
+            else if (cmd.length == 4 && Utils::memcmp(cmd_string, "list", 4) == 0) {
+                static constexpr size_t ELEMENTS_PER_BLOCK = 64;
+
+                FS::DirectoryEntry* buffer = static_cast<FS::DirectoryEntry*>(
+                    Heap::Allocate(ELEMENTS_PER_BLOCK * sizeof(FS::DirectoryEntry))
+                );
+
+                if (buffer == nullptr) {
+                    Log::putsSafe("[SHELL] Failed to allocate memory for directory entries\n\r");
+                    return;
+                }
+
+                FS::Response<size_t> response(0);
+
+                do {                
+                    response = context.GetCurrentDirectory()->List(buffer, ELEMENTS_PER_BLOCK);
+
+                    if (response.CheckError()) {
+                        Log::printfSafe("[SHELL] Failed to list current directory (error %d)\n\r", static_cast<int>(response.GetError()));
+                        Heap::Free(buffer);
+                        return;
+                    }
+
+                    size_t count = response.GetValue();
+
+                    for (size_t i = 0; i < count; ++i) {
+                        const FS::DirectoryEntry& entry = buffer[i];
+                        
+                        for (size_t j = 0; j < entry.NameLength; ++j) {
+                            Log::putcSafe(entry.Name[j]);
+                        }
+                        Log::putsSafe("\n\r");
+                    }
+                } while (response.GetValue() == ELEMENTS_PER_BLOCK);
+
+                Heap::Free(buffer);
+            }
+            else if (cmd.length >= 4 && Utils::memcmp(cmd_string, "goto", 4) == 0) {
+                if (cmd.length <= 5) {
+                    Log::putsSafe("[SHELL] No path provided for goto command\n\r");
+                }
+                else if (cmd_string[4] != ' ') {
+                    Log::putsSafe("[SHELL] Invalid syntax for goto command\n\r");
+                }
+                else {
+                    const char* path = cmd_string + 5;
+                    size_t path_length = cmd.length - 5;
+
+                    if (path_length == 1 && path[0] == '.') {
+                        return;
+                    }
+                    else if (path_length == 2 && path[0] == '.' && path[1] == '.') {
+                        context.OpenParentDirectory();
+                        return;
+                    }
+
+                    FS::DirectoryEntry entry {
+                        .NameLength = path_length,
+                        .Name = path
+                    };
+
+                    auto response = context.GetCurrentDirectory()->Find(entry);
+
+                    if (response.CheckError()) {
+                        if (response.GetError() == FS::Status::NOT_FOUND) {
+                            Log::putsSafe("[SHELL] No such directory exists\n\r");
+                        }
+                        else {
+                            Log::putsSafe("[SHELL] Failed to find directory entry for goto command\n\r");
+                        }
+                    }
+                    else {
+                        FS::IFNode* node = response.GetValue();
+
+                        if (node == nullptr || !node->IsDirectory()) {
+                            Log::putsSafe("[SHELL] The specified path is not a valid directory\n\r");
+                        }
+                        else {
+                            context.OpenSubdirectory(node, path, path_length);
+                        }
+                    }
+                }
+            }
+            else {
+                Log::putsSafe("[SHELL] Unknown command: ");
+                Log::putsSafe(cmd_string);
+                Log::putsSafe("\n\r");
+            }
         }
     }
 }
@@ -237,7 +434,15 @@ namespace Services {
 
             const auto keyboardBuffer = response.GetValue();
 
-            InputBuffer inputBuffer(BUFFER_SIZE);
+            Optional<CommandContext> context_wrapper = CommandContext::Create();
+
+            if (!context_wrapper.HasValue()) {
+                Panic::PanicShutdown("(SHELL) COULD NOT CREATE COMMAND CONTEXT\n\r");
+            }
+
+            CommandContext context = context_wrapper.GetValue();
+
+            InputBuffer inputBuffer(BUFFER_SIZE, context);
 
             if (!inputBuffer.IsValid()) {
                 Panic::PanicShutdown("(SHELL) COULD NOT START KERNEL SHELL\n\r");
@@ -246,7 +451,7 @@ namespace Services {
             inputBuffer.SetExecuteCallback(OnExecute);
 
             Log::putsSafe("[SHELL] Kernel shell initialized\n\r");
-            Log::putsSafe("> ");
+            inputBuffer.DisplayPrompt();
 
             while (true) {
                 Devices::KeyboardDispatcher::BasicKeyPacket packet;
