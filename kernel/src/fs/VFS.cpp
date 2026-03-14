@@ -84,17 +84,11 @@ FS::Response<FS::DirectoryEntry> VFS::ExtractFileName(const FS::DirectoryEntry& 
     return FS::Response(filename);
 }
 
-bool VFS::Construct(VFS* fs) {
+Success VFS::Construct(VFS* fs) {
     auto newfs = new(fs) VFS;
 
-    if (!NPFS::Directory::Construct(&newfs->root)) {
-        return false;
-    }
-
-    return true;
+    return NPFS::Directory::Construct(&newfs->root);
 }
-
-#include <screen/Log.hpp>
 
 FS::Response<FS::IFNode*> VFS::OpenParent(const FS::DirectoryEntry& filepath, FS::DirectoryEntry& filename) {
     if (!CheckFilePath(filepath)) {

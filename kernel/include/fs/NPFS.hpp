@@ -17,6 +17,7 @@
 #include <cstddef>
 
 #include <shared/Lock.hpp>
+#include <shared/Response.hpp>
 
 #include <fs/IFNode.hpp>
 #include <fs/Status.hpp>
@@ -33,7 +34,7 @@ protected:
         FS::Status              Remove(const FS::DirectoryEntry& fileref) final;
         FS::Response<size_t>    List(FS::DirectoryEntry* list, size_t length, size_t from = 0) final;
 
-        static bool             Construct(Directory* directory);
+        static Success          Construct(Directory* directory);
         void                    Destroy() final;
 
     private:
@@ -53,8 +54,8 @@ protected:
         FS::Response<size_t> Read(size_t offset, size_t count, uint8_t* buffer) final;
         FS::Response<size_t> Write(size_t offset, size_t count, const uint8_t* buffer) final;
 
-        static bool Construct(File* file);
-        void        Destroy() final;
+        static Success      Construct(File* file);
+        void                Destroy() final;
     
     private:
         void* container;
@@ -66,5 +67,5 @@ protected:
     NPFS();
 
 public:
-    static bool Construct(NPFS* fs);
+    static Success Construct(NPFS* fs);
 };

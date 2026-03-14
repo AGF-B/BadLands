@@ -18,6 +18,8 @@
 #include <fs/NPFS.hpp>
 #include <fs/Status.hpp>
 
+#include <shared/Response.hpp>
+
 class VFS final : public NPFS {
 private:
     VFS();
@@ -34,7 +36,7 @@ private:
     static FS::Response<FS::DirectoryEntry> ExtractFileName(const FS::DirectoryEntry& filepath);
 
 public:
-    static bool Construct(VFS* fs);
+    static Success Construct(VFS* fs);
     
     FS::Response<FS::IFNode*> OpenParent(
         const FS::DirectoryEntry& filepath,

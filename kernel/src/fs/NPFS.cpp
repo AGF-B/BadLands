@@ -18,6 +18,7 @@
 #include <new>
 
 #include <shared/LockGuard.hpp>
+#include <shared/Response.hpp>
 
 #include <fs/IFNode.hpp>
 #include <fs/NPFS.hpp>
@@ -383,7 +384,7 @@ FS::Status NPFS::Directory::Create(const FS::DirectoryEntry& fileref, FS::FileTy
 
         File* file = new(mem) File(owner);
 
-        if (!File::Construct(file)) {
+        if (!File::Construct(file).IsSuccess()) {
             Heap::Free(nameCopy);
             Heap::Free(mem);
             return FS::Status::DEVICE_ERROR;
@@ -403,7 +404,7 @@ FS::Status NPFS::Directory::Create(const FS::DirectoryEntry& fileref, FS::FileTy
 
         Directory* directory = new(mem) Directory(owner);
 
-        if (!Directory::Construct(directory)) {
+        if (!Directory::Construct(directory).IsSuccess()) {
             Heap::Free(nameCopy);
             Heap::Free(mem);
             return FS::Status::DEVICE_ERROR;
@@ -535,20 +536,20 @@ FS::Response<size_t> NPFS::Directory::List(FS::DirectoryEntry* list, size_t leng
     return FS::Response(length - remaining);
 }
 
-bool NPFS::Directory::Construct(Directory* directory) {
+Success NPFS::Directory::Construct(Directory* directory) {
     DirectoryData* data = static_cast<DirectoryData*>(Heap::Allocate(sizeof(DirectoryData)));
 
     if (data == nullptr) {
-        return false;
+        return Failure();
     }
     else if (!DataNode::Construct(data->data)) {
         Heap::Free(data);
-        return false;
+        return Failure();
     }
 
     directory->container = data;
 
-    return true;
+    return Success();
 }
 
 void NPFS::Directory::Destroy() {
@@ -735,22 +736,22 @@ FS::Response<size_t> NPFS::File::Write(size_t offset, size_t count, const uint8_
     return FS::Response<size_t>(bufferEnd - buffer);
 }
 
-bool NPFS::File::Construct(File* file) {
+Success NPFS::File::Construct(File* file) {
     FileData* data = static_cast<FileData*>(Heap::Allocate(sizeof(FileData)));
 
     if (data == nullptr) {
-        return false;
+        return Failure();
     }
     else if (!DataNode::Construct(data->data)) {
         Heap::Free(data);
-        return false;
+        return Failure();
     }
 
     data->size = 0;
 
     file->container = data;
 
-    return true;
+    return Success();
 }
 
 void NPFS::File::Destroy() {
@@ -764,12 +765,8 @@ void NPFS::File::Destroy() {
 
 NPFS::NPFS() : root(this) {}
 
-bool NPFS::Construct(NPFS* fs) {
+Success NPFS::Construct(NPFS* fs) {
     auto newfs = new(fs) NPFS;
 
-    if (!Directory::Construct(&newfs->root)) {
-        return false;
-    }
-
-    return true;
+    return Directory::Construct(&newfs->root);
 }
