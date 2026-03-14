@@ -104,7 +104,7 @@ namespace {
         if (vfs == nullptr) {
             Panic::PanicShutdown("VFS MEMORY ALLOCATION FAILED\n\r");
         }
-        else if (!VFS::Construct(vfs)) {
+        else if (!VFS::Construct(vfs).IsSuccess()) {
             Panic::PanicShutdown("VFS INITIALIZATION FAILED\n\r");
         }
 
