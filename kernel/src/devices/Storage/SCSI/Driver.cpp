@@ -22,6 +22,7 @@
 
 #include <devices/Storage/Controller.hpp>
 #include <devices/Storage/Driver.hpp>
+#include <devices/Block/Device.hpp>
 #include <devices/Storage/SCSI/Driver.hpp>
 
 #include <mm/Heap.hpp>
@@ -343,6 +344,8 @@ namespace Devices::Storage::SCSI {
 
             return Failure();
         }
+
+        Block::Device::AddDevice(this);
 
         return Success();
     }
