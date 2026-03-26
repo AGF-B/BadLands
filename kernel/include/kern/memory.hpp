@@ -18,6 +18,9 @@ namespace kern {
         inline constexpr unique_ptr() : ptr {nullptr} {}
         inline constexpr unique_ptr(T* ptr) : ptr {ptr} {}
         inline constexpr unique_ptr(const unique_ptr&) = delete;
+        inline constexpr unique_ptr(unique_ptr&& other) : ptr{other.ptr} {
+            other.ptr = nullptr;
+        }
         
         inline constexpr ~unique_ptr() {
             if (ptr != nullptr) {
@@ -26,7 +29,8 @@ namespace kern {
             }
         }
 
-        inline constexpr T* get() const { return ptr; }
+        inline constexpr T* get() { return ptr; }
+        inline constexpr const T* get() const { return ptr; }
 
         inline constexpr unique_ptr& operator=(const unique_ptr&) = delete;
 
@@ -45,6 +49,10 @@ namespace kern {
         inline constexpr unique_ptr() : ptr{nullptr}, length{0} {}
         inline constexpr unique_ptr(T* ptr, size_t length) : ptr {ptr}, length{length} {}
         inline constexpr unique_ptr(const unique_ptr&) = delete;
+        inline constexpr unique_ptr(unique_ptr&& other) : ptr{other.ptr}, length{other.length} {
+            other.ptr = nullptr;
+            other.length = 0;
+        }
         
         inline constexpr ~unique_ptr() {
             if (ptr != nullptr) {
@@ -56,7 +64,8 @@ namespace kern {
             }
         }
 
-        inline constexpr T* get() const { return ptr; }
+        inline constexpr T* get() { return ptr; }
+        inline constexpr const T* get() const { return ptr; }
 
         inline constexpr unique_ptr& operator=(const unique_ptr&) = delete;
 
@@ -64,7 +73,11 @@ namespace kern {
         inline constexpr T& operator*() = delete;
         inline constexpr operator bool() const { return ptr != nullptr; }
 
-        inline constexpr T& operator[](size_t i) const requires std::is_array_v<T> {
+        inline constexpr T& operator[](size_t i) {
+            return ptr[i];
+        }
+
+        inline constexpr const T& operator[](size_t i) const {
             return ptr[i];
         }
     };
