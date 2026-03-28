@@ -44,41 +44,80 @@ namespace {
             uint8_t end_chs[3];
             uint32_t start_lba;
             uint32_t lba_count;
+
+            constexpr bool IsZero() const {
+                return boot_indicator == 0
+                && start_chs[0] == 0 && start_chs[1] == 0 && start_chs[2] == 0
+                && partition_type == 0
+                && end_chs[0] == 0 && end_chs[1] == 0 && end_chs[2] == 0
+                && start_lba == 0
+                && lba_count == 0;
+            }
         } partitions[4];
 
         uint16_t signature;
-    };
 
-    kern::unique_ptr<MBR> ParseMBR(const uint8_t* data) {
-        auto mbr = kern::make_unique<MBR>();
+        static constexpr kern::unique_ptr<MBR> FromBytes(const uint8_t* data) {
+            auto mbr = kern::make_unique<MBR>();
 
-        if (!mbr) {
-            return kern::unique_ptr<MBR>();
-        }
+            if (!mbr) {
+                return kern::unique_ptr<MBR>();
+            }
 
-        Utils::memcpy(&mbr->boot_code, data, MBR::BOOT_CODE_LENGTH);
-        
-        mbr->disk_signature = *reinterpret_cast<const uint32_t*>(data + MBR::DISK_SIGNATURE_OFFSET);
-
-        for (size_t i = 0; i < 4; ++i) {
-            const size_t offset = MBR::PARTITION_ENTRIES_OFFSET + i * MBR::PARTITION_ENTRY_SIZE;
+            Utils::memcpy(&mbr->boot_code, data, MBR::BOOT_CODE_LENGTH);
             
-            mbr->partitions[i].boot_indicator = data[offset];
-            Utils::memcpy(&mbr->partitions[i].start_chs, &data[offset + 1], 3);
-            mbr->partitions[i].partition_type = data[offset + 4];
-            Utils::memcpy(&mbr->partitions[i].end_chs, &data[offset + 5], 3);
-            mbr->partitions[i].start_lba = *reinterpret_cast<const uint32_t*>(&data[offset + 8]);
-            mbr->partitions[i].lba_count = *reinterpret_cast<const uint32_t*>(&data[offset + 12]);
+            mbr->disk_signature = *reinterpret_cast<const uint32_t*>(data + MBR::DISK_SIGNATURE_OFFSET);
+
+            for (size_t i = 0; i < 4; ++i) {
+                const size_t offset = MBR::PARTITION_ENTRIES_OFFSET + i * MBR::PARTITION_ENTRY_SIZE;
+                
+                mbr->partitions[i].boot_indicator = data[offset];
+                Utils::memcpy(&mbr->partitions[i].start_chs, &data[offset + 1], 3);
+                mbr->partitions[i].partition_type = data[offset + 4];
+                Utils::memcpy(&mbr->partitions[i].end_chs, &data[offset + 5], 3);
+                mbr->partitions[i].start_lba = *reinterpret_cast<const uint32_t*>(&data[offset + 8]);
+                mbr->partitions[i].lba_count = *reinterpret_cast<const uint32_t*>(&data[offset + 12]);
+            }
+
+            mbr->signature = *reinterpret_cast<const uint16_t*>(&data[MBR::SIGNATURE_OFFSET]);
+
+            if (mbr->signature != 0xAA55) {
+                return kern::unique_ptr<MBR>();
+            }
+
+            return mbr;
         }
 
-        mbr->signature = *reinterpret_cast<const uint16_t*>(&data[MBR::SIGNATURE_OFFSET]);
+        constexpr bool IsProtective() const {
+            int non_empty_partition = -1;
 
-        if (mbr->signature != 0xAA55) {
-            return kern::unique_ptr<MBR>();
+            for (int i = 0; i < 4; ++i) {
+                if (!partitions[i].IsZero()) {
+                    if (non_empty_partition != -1) {
+                        return false;
+                    }
+
+                    non_empty_partition = i;
+                }
+            }
+
+            if (non_empty_partition != -1) {
+                const auto& partition = partitions[non_empty_partition];
+
+                static constexpr uint8_t PROTECTIVE_MBR_CHS_HEAD = 2;
+                static constexpr uint8_t PROTECTIVE_MBR_PARTITION_TYPE = 0xEE;
+                static constexpr uint32_t PROTECTIVE_MBR_FIRST_LBA = 1;
+
+                return partition.start_chs[0] == 0
+                    && partition.start_chs[1] == PROTECTIVE_MBR_CHS_HEAD
+                    && partition.start_chs[2] == 0
+                    && partition.partition_type == PROTECTIVE_MBR_PARTITION_TYPE
+                    && partition.start_lba == PROTECTIVE_MBR_FIRST_LBA;
+            }
+
+            return false;
         }
-
-        return mbr;
-    }
+    };
 }
 
 namespace Devices::Block {
@@ -97,9 +136,12 @@ namespace Devices::Block {
             return Optional<Device*>();
         }
 
-        auto mbr = ParseMBR(boot_sector.get());
+        auto mbr = MBR::FromBytes(boot_sector.get());
 
-        
+        if (mbr->IsProtective()) {
+            // need to read GPT
+            
+        }
     }
 
     FS::Response<size_t> Device::Read(size_t offset, size_t count, uint8_t* buffer) {
