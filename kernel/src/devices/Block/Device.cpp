@@ -16,6 +16,8 @@
 
 #include <shared/Response.hpp>
 
+#include <crypto/crc.hpp>
+
 #include <devices/Block/Device.hpp>
 
 #include <kern/memory.hpp>
@@ -118,6 +120,100 @@ namespace {
             return false;
         }
     };
+
+    struct GPT {
+        uint64_t signature;
+        uint32_t revision;
+        uint32_t header_size;
+        mutable uint32_t header_crc32;
+        uint32_t reserved;
+        uint64_t my_lba;
+        uint64_t alternate_lba;
+        uint64_t first_usable_lba;
+        uint64_t last_usable_lba;
+        uint8_t  disk_guid[16];
+        uint64_t partition_entries_lba;
+        uint32_t partition_entry_count;
+        uint32_t partition_entry_size;
+        uint32_t partition_entries_crc32;
+        uint32_t reserved2[];
+
+        using Interface = Devices::Block::Interface;
+
+        constexpr bool IsPartitionArrayValid(size_t block_size, Interface* interface) const {
+            if (partition_entry_size < 128 || partition_entry_size > block_size) {
+                return false;
+            }
+            else if (partition_entry_count == 0) {
+                return false;
+            }
+            else if (partition_entries_lba < 2 || partition_entries_lba >= interface->GetBlocksCount()) {
+                return false;
+            }
+
+            static constexpr size_t BATCH_SIZE = 32;
+
+            const size_t batch_array_size = BATCH_SIZE * partition_entry_size;
+            const size_t batch_array_blocks = (batch_array_size + block_size - 1) / block_size;
+            const size_t batch_count = (partition_entry_count + BATCH_SIZE - 1) / BATCH_SIZE;
+
+            auto batch_buffer = kern::make_unique<uint8_t[]>(batch_array_blocks * block_size);
+
+            if (!batch_buffer) {
+                return false;
+            }
+
+            auto crc_processor = Crypto::CRC32Engine();
+
+            for (size_t batch_id = 0; batch_id < batch_count; ++batch_id) {
+                const size_t batch_offset = batch_id * batch_array_size;
+                const size_t remaining_entries = partition_entry_count - batch_offset / partition_entry_size;
+                const size_t batch_entries = BATCH_SIZE < remaining_entries ? BATCH_SIZE : remaining_entries;
+                const size_t batch_size = batch_entries * partition_entry_size;
+                const size_t batch_blocks = (batch_size + block_size - 1) / block_size;
+                const size_t batch_lba = partition_entries_lba + batch_id * batch_array_blocks;
+
+                if (!interface->ReadBlocks(batch_lba, batch_blocks, batch_buffer.get()).IsSuccess()) {
+                    return false;
+                }
+
+                crc_processor.Update(batch_buffer.get(), batch_size);
+            }
+
+            const uint32_t expected = partition_entries_crc32;
+            const uint32_t actual = crc_processor.Finalize();
+
+            return expected == actual;
+        }
+
+        constexpr bool IsValid(size_t lba, size_t block_size, Interface* interface) const {
+            static constexpr uint64_t GPT_SIGNATURE = 0x5452415020494645;
+
+            if (signature != GPT_SIGNATURE) {
+                return false;
+            }
+            else if (header_size < 92 || header_size > block_size) {
+                return false;
+            }
+            else if (my_lba != lba) {
+                return false;
+            }
+            
+            const uint8_t* ptr = reinterpret_cast<const uint8_t*>(this);
+
+            const uint32_t expected = header_crc32;
+            header_crc32 = 0;
+
+            const uint32_t actual = Crypto::CRC32(ptr, header_size);
+            header_crc32 = expected;
+
+            if (actual != expected) {
+                return false;
+            }
+
+            return IsPartitionArrayValid(block_size, interface);
+        };
+    };
 }
 
 namespace Devices::Block {
@@ -138,10 +234,27 @@ namespace Devices::Block {
 
         auto mbr = MBR::FromBytes(boot_sector.get());
 
-        if (mbr->IsProtective()) {
-            // need to read GPT
+        if (mbr->IsProtective()) {            
+            auto gpt_sector = kern::make_unique<uint8_t[]>(interface->GetBlockSize());
             
+            if (!gpt_sector) {
+                return Optional<Device*>();
+            }
+
+            static constexpr size_t PRIMARY_GPT_LBA = 1;
+
+            if (!interface->ReadBlocks(PRIMARY_GPT_LBA, 1, gpt_sector.get()).IsSuccess()) {
+                return Optional<Device*>();
+            }
+
+            auto gpt = reinterpret_cast<const GPT*>(gpt_sector.get());
+
+            if (!gpt->IsValid(PRIMARY_GPT_LBA, interface->GetBlockSize(), interface)) {
+                return Optional<Device*>();
+            }
         }
+
+        return Optional<Device*>();
     }
 
     FS::Response<size_t> Device::Read(size_t offset, size_t count, uint8_t* buffer) {
