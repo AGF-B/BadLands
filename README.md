@@ -37,7 +37,7 @@ The listed versions are the ones I am currently using, feel free to use older or
 ### To run the QEMU simulation
 
 - ``qemu-system-x86_64`` | tested on version 10.1.93 (v10.2.0-rc3)
-- ``sgdisk`` : GPT fdisk (sgdisk) version 1.0.10
+- ``parted`` : parted (GNU parted) 3.6
 - ``mkdosfs`` : mkfs.fat 4.2 (2021-01-31)
 - ``mmd``, ``mcopy`` : Mtools version 4.0.48
 - OVMF UEFI Firmware. Prebuilt release binaries for x64 (CODE and VARS) can be found [here](https://retrage.github.io/edk2-nightly/).
