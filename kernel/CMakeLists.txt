@@ -49,6 +49,7 @@ add_library(xHCI_USB OBJECT
 
 add_executable(KERNEL_IMG
     "src/acpi/Interface.cpp"
+    "src/crypto/crc.cpp"
     "src/devices/Block/Device.cpp"
     "src/devices/KeyboardDispatcher/Converter.cpp"
     "src/devices/KeyboardDispatcher/Multiplexer.cpp"
