@@ -53,4 +53,15 @@ namespace Crypto {
 
         return crc32;
     }
+
+    void CRC32Engine::Update(const uint8_t* data, size_t length) {
+        for (size_t i = 0; i < length; i++) {
+            crc32 ^= data[i];
+            crc32 = (crc32 >> 8) ^ CRC32_LUT[crc32 & 0xFF];
+        }
+    }
+
+    uint32_t CRC32Engine::Finalize() {
+        return crc32 ^ 0xFFFFFFFF;
+    }
 }
