@@ -14,6 +14,8 @@
 
 #include <cstdint>
 
+#include <new>
+
 #include <shared/Response.hpp>
 
 #include <crypto/crc.hpp>
@@ -26,6 +28,8 @@
 #include <mm/Utils.hpp>
 
 #include <screen/Log.hpp>
+
+#include <exports.hpp>
 
 namespace {
     struct MBR {
@@ -214,9 +218,161 @@ namespace {
             return IsPartitionArrayValid(block_size, interface);
         };
     };
+
+    struct GPTPartitionEntry {
+        uint8_t partition_type_guid[16];
+        uint8_t unique_partition_guid[16];
+        uint64_t starting_lba;
+        uint64_t ending_lba;
+        uint64_t attributes;
+        uint16_t partition_name[36];
+    };
+
+    // check that the structure is correctly packed and has the expected size, i.e., can memcpy directly to/from it
+    static_assert(sizeof(GPTPartitionEntry) == 128);
+
+    class GPTPartitionFetcher {
+    private:
+        using Interface = GPT::Interface;
+
+        const GPT* gpt;
+        const size_t blockSize;
+
+        Interface* const interface;
+
+        size_t currentPartition     = 0;
+        size_t cachedPartitionIndex = 0;
+        size_t cachedPartitions;
+        size_t cachedBlocks         = 0;
+        kern::unique_ptr<uint8_t[]> cached;
+
+        Success UpdateCache(size_t partitionIndex) {
+            if (partitionIndex >= gpt->partition_entry_count) {
+                return Failure();
+            }
+
+            const size_t cache_lba = gpt->partition_entries_lba + partitionIndex * gpt->partition_entry_size / blockSize;
+
+            if (!interface->ReadBlocks(cache_lba, cachedBlocks, cached.get()).IsSuccess()) {
+                return Failure();
+            }
+
+            cachedPartitionIndex = (cache_lba - gpt->partition_entries_lba) * blockSize / gpt->partition_entry_size;
+
+            return Success();
+        }
+
+        bool IsPartitionFullyWithinCache(size_t partitionIndex) const {
+            const size_t partition_end = partitionIndex * gpt->partition_entry_size;
+            const size_t cache_end = cachedPartitionIndex * gpt->partition_entry_size + cachedBlocks * blockSize;
+
+            return partition_end <= cache_end;
+        }
+
+    public:
+        GPTPartitionFetcher(const GPT* gpt, size_t blockSize, Interface* interface, size_t cachedPartitions)
+            : gpt{gpt}, blockSize{blockSize}, interface{interface}, cachedPartitions{cachedPartitions} {}
+
+        Success Initialize() {
+            size_t cache_size = cachedPartitions * gpt->partition_entry_size;
+
+            if (cache_size == 0) {
+                cache_size = blockSize;
+            }
+
+            cachedBlocks = (cache_size + blockSize - 1) / blockSize;
+            cachedPartitions = cachedBlocks * blockSize / gpt->partition_entry_size;
+
+            const size_t cache_lba = gpt->partition_entries_lba;
+
+            cached = kern::make_unique<uint8_t[]>(cachedBlocks * blockSize);
+
+            if (!cached) {
+                return Failure();
+            }
+
+            if (!interface->ReadBlocks(cache_lba, cachedBlocks, cached.get()).IsSuccess()) {
+                return Failure();
+            }
+
+            return Success();
+        }
+
+        Success Reset() {
+            currentPartition = 0,
+            cachedPartitionIndex = 0;
+            return Initialize();
+        }
+
+        bool HasNext() const {
+            return currentPartition < gpt->partition_entry_count;
+        }
+        
+        Optional<GPTPartitionEntry> Next() {
+            if (!HasNext()) {
+                return Optional<GPTPartitionEntry>();
+            }
+
+            if (currentPartition >= cachedPartitionIndex + cachedPartitions || !IsPartitionFullyWithinCache(currentPartition)) {
+                if (!UpdateCache(currentPartition).IsSuccess()) {
+                    return Optional<GPTPartitionEntry>();
+                }
+            }
+
+            const size_t partition_offset = currentPartition - cachedPartitionIndex;
+            const GPTPartitionEntry* entry = reinterpret_cast<const GPTPartitionEntry*>(cached.get() + partition_offset * gpt->partition_entry_size);
+            currentPartition++;
+
+            return Optional<GPTPartitionEntry>(*entry);
+        }
+    };
 }
 
 namespace Devices::Block {
+    FS::Response<size_t> Partition::Read(size_t offset, size_t count, uint8_t* buffer) {
+        const uint64_t blockSize    = interface->GetBlockSize();
+        const uint64_t startBlock   = offset / blockSize;
+        const uint64_t endBlock     = (offset + count + blockSize - 1) / blockSize;
+        const uint64_t blocksToRead = endBlock - startBlock;
+
+        if (blocksToRead == 0) {
+            return FS::Response<size_t>(0);
+        }
+        else if (offset % blockSize != 0 || count % blockSize != 0) {
+            return FS::Response<size_t>(FS::Status::INVALID_PARAMETER);
+        }
+        else if (endBlock > blocksCount) {
+            return FS::Response<size_t>(FS::Status::OUT_OF_BOUNDS);
+        }
+        else if (!interface->ReadBlocks(firstBlock + startBlock, blocksToRead, buffer).IsSuccess()) {
+            return FS::Response<size_t>(FS::Status::DEVICE_ERROR);
+        }
+
+        return FS::Response<size_t>(blocksToRead * blockSize);
+    }
+
+    FS::Response<size_t> Partition::Write(size_t offset, size_t count, const uint8_t* buffer) {
+        const uint64_t blockSize        = interface->GetBlockSize();
+        const uint64_t startBlock       = offset / blockSize;
+        const uint64_t endBlock         = (offset + count + blockSize - 1) / blockSize;
+        const uint64_t blocksToWrite    = endBlock - startBlock;
+
+        if (blocksToWrite == 0) {
+            return FS::Response<size_t>(0);
+        }
+        else if (offset % blockSize != 0 || count % blockSize != 0) {
+            return FS::Response<size_t>(FS::Status::INVALID_PARAMETER);
+        }
+        else if (endBlock > blocksCount) {
+            return FS::Response<size_t>(FS::Status::OUT_OF_BOUNDS);
+        }
+        else if (!interface->WriteBlocks(firstBlock + startBlock, blocksToWrite, buffer).IsSuccess()) {
+            return FS::Response<size_t>(FS::Status::DEVICE_ERROR);
+        }
+
+        return FS::Response<size_t>(blocksToWrite * blockSize);
+    }
+
     Optional<Device*> Device::AddDevice(Interface* interface) {
         if (interface == nullptr) {
             return Optional<Device*>();
@@ -234,27 +390,130 @@ namespace Devices::Block {
 
         auto mbr = MBR::FromBytes(boot_sector.get());
 
+        kern::unique_ptr<Device> device_wrapper = kern::make_unique<Device>(interface, nextDeviceId++);
+
+        size_t devId = device_wrapper->GetDeviceId();
+
+        // simple integer log 10, + 1, used for device naming
+        size_t log10_id = 1;
+        for (size_t i = devId; i >= 10; i /= 10) {
+            log10_id++;
+        }
+
+        // block device naming follows "bdev{deviceId}"
+        // block device partition naming follows "bdev{deviceId}-{partitionId}"
+        // names are not null-terminated in the filesystem
+
+        char* device_name = static_cast<char*>(Heap::Allocate(4 + log10_id));
+        Utils::memcpy(device_name, "bdev", 4);
+
+        for (size_t i = 0; i < log10_id; ++i) {
+            device_name[4 + log10_id - 1 - i] = '0' + (devId % 10);
+            devId /= 10;
+        }
+
+        const size_t name_length = 4 + log10_id;
+
+        if (Kernel::Exports.deviceInterface->AddNode({
+            .NameLength = name_length,
+            .Name = device_name
+        }, device_wrapper.get()) != FS::Status::SUCCESS) {
+            Log::putsSafe("[DEV] Failed to add block device to filesystem");
+            Heap::Free(device_name);
+            return Optional<Device*>();
+        }
+
+        Heap::Free(device_name);
+
+        Device* device = device_wrapper.release();
+
+        // from now on, an error is not fatal, it just prevents partitions from being loaded.
+
         if (mbr->IsProtective()) {            
             auto gpt_sector = kern::make_unique<uint8_t[]>(interface->GetBlockSize());
             
             if (!gpt_sector) {
-                return Optional<Device*>();
+                return Optional(device);
             }
 
             static constexpr size_t PRIMARY_GPT_LBA = 1;
 
             if (!interface->ReadBlocks(PRIMARY_GPT_LBA, 1, gpt_sector.get()).IsSuccess()) {
-                return Optional<Device*>();
+                return Optional(device);
             }
 
             auto gpt = reinterpret_cast<const GPT*>(gpt_sector.get());
 
             if (!gpt->IsValid(PRIMARY_GPT_LBA, interface->GetBlockSize(), interface)) {
-                return Optional<Device*>();
+                return Optional(device);
+            }
+
+            auto partition_fetcher = GPTPartitionFetcher(gpt, interface->GetBlockSize(), interface, 32);
+            
+            if (!partition_fetcher.Initialize().IsSuccess()) {
+                Log::putsSafe("Failed to initialize GPT partition fetcher");
+                return Optional(device);
+            }
+
+            size_t partition_count = 0;
+
+            while (partition_fetcher.HasNext()) {
+                auto entryOpt = partition_fetcher.Next();
+
+                if (!entryOpt.HasValue()) {
+                    Log::putsSafe("Failed to fetch GPT partition entry");
+                    return Optional(device);
+                }
+
+                const auto& entry = entryOpt.GetValue();
+
+                if (entry.starting_lba == 0 && entry.ending_lba == 0) {
+                    continue;
+                }
+                else if (entry.starting_lba < gpt->first_usable_lba
+                    || entry.ending_lba > gpt->last_usable_lba
+                    || entry.starting_lba > entry.ending_lba
+                ) {
+                    continue;
+                }
+                else {
+                    ++partition_count;
+                }
+            }
+
+            if (!partition_fetcher.Reset().IsSuccess()) {
+                Log::putsSafe("Failed to reset GPT partition fetcher");
+                return Optional(device);
+            }
+
+            while (partition_fetcher.HasNext()) {
+                auto entryOpt = partition_fetcher.Next();
+
+                if (!entryOpt.HasValue()) {
+                    Log::putsSafe("Failed to fetch GPT partition entry");
+                    return Optional(device);
+                }
+
+                const auto& entry = entryOpt.GetValue();
+
+                if (entry.starting_lba == 0 && entry.ending_lba == 0) {
+                    continue;
+                }
+                else if (entry.starting_lba < gpt->first_usable_lba
+                    || entry.ending_lba > gpt->last_usable_lba
+                    || entry.starting_lba > entry.ending_lba
+                ) {
+                    continue;
+                }
+
+                const uint64_t partition_first_block = entry.starting_lba;
+                const uint64_t partition_block_count = entry.ending_lba - entry.starting_lba + 1;
+
+                // create and add partition
             }
         }
 
-        return Optional<Device*>();
+        return Optional(device);
     }
 
     FS::Response<size_t> Device::Read(size_t offset, size_t count, uint8_t* buffer) {

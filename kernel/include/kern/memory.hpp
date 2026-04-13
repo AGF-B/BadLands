@@ -28,6 +28,13 @@ namespace kern {
 
         using X = typename std::remove_extent<T>::type;
 
+        constexpr void Release() {
+            if (ptr != nullptr) {
+                ptr->~T();
+                Heap::Free(ptr);
+            }
+        }
+
     public:
         inline constexpr unique_ptr() : ptr {nullptr} {}
         inline constexpr unique_ptr(T* ptr) : ptr {ptr} {}
@@ -36,17 +43,27 @@ namespace kern {
             other.ptr = nullptr;
         }
         
-        inline constexpr ~unique_ptr() {
-            if (ptr != nullptr) {
-                ptr->~T();
-                Heap::Free(ptr);
-            }
+        inline constexpr ~unique_ptr() { Release(); }
+
+        inline constexpr T* release() {
+            T* tmp = ptr;
+            ptr = nullptr;
+            return tmp;
         }
 
         inline constexpr T* get() { return ptr; }
         inline constexpr const T* get() const { return ptr; }
 
         inline constexpr unique_ptr& operator=(const unique_ptr&) = delete;
+        inline constexpr unique_ptr& operator=(unique_ptr&& other) {
+            if (this != &other) {
+                Release();
+                ptr = other.ptr;
+                other.ptr = nullptr;
+            }
+
+            return *this;
+        }
 
         inline constexpr T* operator->() const { return ptr; }
         inline constexpr T& operator*() const { return *ptr; }
@@ -59,16 +76,7 @@ namespace kern {
         T* ptr;
         size_t length;
 
-    public:
-        inline constexpr unique_ptr() : ptr{nullptr}, length{0} {}
-        inline constexpr unique_ptr(T* ptr, size_t length) : ptr {ptr}, length{length} {}
-        inline constexpr unique_ptr(const unique_ptr&) = delete;
-        inline constexpr unique_ptr(unique_ptr&& other) : ptr{other.ptr}, length{other.length} {
-            other.ptr = nullptr;
-            other.length = 0;
-        }
-        
-        inline constexpr ~unique_ptr() {
+        constexpr void Release() {
             if (ptr != nullptr) {
                 for (size_t i = 0; i < length; ++i) {
                     ptr[i].~T();
@@ -78,10 +86,41 @@ namespace kern {
             }
         }
 
+    public:
+        inline constexpr unique_ptr() : ptr{nullptr}, length{0} {}
+        inline constexpr unique_ptr(T* ptr, size_t length) : ptr {ptr}, length{length} {}
+        inline constexpr unique_ptr(const unique_ptr&) = delete;
+        inline constexpr unique_ptr(unique_ptr&& other) : ptr{other.ptr}, length{other.length} {
+            other.ptr = nullptr;
+            other.length = 0;
+        }
+        
+        inline constexpr ~unique_ptr() { Release(); }
+
+        inline constexpr T* release() {
+            T* tmp = ptr;
+            ptr = nullptr;
+            length = 0;
+            return tmp;
+        }
+
         inline constexpr T* get() { return ptr; }
         inline constexpr const T* get() const { return ptr; }
 
         inline constexpr unique_ptr& operator=(const unique_ptr&) = delete;
+        inline constexpr unique_ptr& operator=(unique_ptr&& other) {
+            if (this != &other) {
+                Release();
+
+                ptr = other.ptr;
+                length = other.length;
+
+                other.ptr = nullptr;
+                other.length = 0;
+            }
+
+            return *this;
+        }
 
         inline constexpr T* operator->() = delete;
         inline constexpr T& operator*() = delete;

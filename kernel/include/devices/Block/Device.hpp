@@ -22,8 +22,40 @@
 
 #include <fs/IFNode.hpp>
 
+#include <kern/memory.hpp>
+
 namespace Devices {
     namespace Block {
+        class Device;
+
+        class Partition : public FS::File {
+        private:
+            Interface* const interface;
+
+            const size_t deviceId;
+            const size_t partitionId;
+
+            const uint64_t firstBlock;
+            const uint64_t blocksCount;
+
+        public:
+            Partition(Interface* interface, size_t deviceId, size_t partitionId, uint64_t firstBlock, uint64_t blocksCount)
+                : FS::File{nullptr}, interface{interface}, deviceId{deviceId},
+                partitionId{partitionId}, firstBlock{firstBlock}, blocksCount{blocksCount} {}
+
+            inline constexpr size_t GetDeviceId() const { return deviceId; }
+            inline constexpr size_t GetPartitionId() const { return partitionId; }
+
+            virtual FS::Response<size_t> Read(size_t offset, size_t count, uint8_t* buffer) final;
+            virtual FS::Response<size_t> Write(size_t offset, size_t count, const uint8_t* buffer) final;
+
+            // Called by FS when unregistered, not deallocated as owned by the block device. Does nothing.
+            virtual void Destroy() final { }
+            
+            // Called by the block device when cleaning up, deallocates the partition
+            void DestroyPartition();
+        };
+
         class Device : public FS::File {
         private:
             static inline size_t nextDeviceId = 0;
@@ -31,15 +63,24 @@ namespace Devices {
             Interface* const interface;
             size_t deviceId;
 
-            Device(Interface* interface, size_t deviceId) : FS::File{nullptr}, interface{interface}, deviceId{deviceId} {}
+            kern::unique_ptr<Partition[]> partitions{};
+            size_t partitionsCount{0};
 
         public:
+            Device(Interface* interface, size_t deviceId) : FS::File{nullptr}, interface{interface}, deviceId{deviceId} {}
+
             static Optional<Device*> AddDevice(Interface* interface);
+
+            inline constexpr size_t GetDeviceId() const { return deviceId; }
 
             virtual FS::Response<size_t> Read(size_t offset, size_t count, uint8_t* buffer) final;
             virtual FS::Response<size_t> Write(size_t offset, size_t count, const uint8_t* buffer) final;
 
-            virtual void Destroy() final;
+            // Called by FS when unregistered, not deallocated as owned by the device driver. Does nothing.
+            virtual void Destroy() final { }
+
+            // Called by the device driver when cleaning up, deallocates the device
+            void DestroyDevice();
         };
     }
 }
