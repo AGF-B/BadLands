@@ -22,6 +22,7 @@
 
 #include <devices/Block/Device.hpp>
 
+#include <kern/math.hpp>
 #include <kern/memory.hpp>
 
 #include <mm/Heap.hpp>
@@ -329,6 +330,44 @@ namespace {
 }
 
 namespace Devices::Block {
+    size_t Partition::GetNameLength() const {
+        // name format is "bdev{deviceId}-{partitionId}"
+        const size_t root_size = 4;
+        const size_t device_id_size = kern::log(deviceId, 10) + 1;
+        const size_t partition_id_size = kern::log(partitionId, 10) + 1;
+        return root_size + device_id_size + 1 + partition_id_size;
+    }
+
+    kern::unique_ptr<char[]> Partition::GetName() const {
+        const size_t name_length = GetNameLength();
+        auto name = kern::make_unique<char[]>(name_length);
+
+        if (name) {
+            char* ptr = name.get();
+
+            Utils::memcpy(ptr, "bdev", 4);
+
+            ptr += 4;
+
+            const size_t device_id_length = kern::log(deviceId, 10) + 1;
+
+            for (size_t i = 0, devId = deviceId; i < device_id_length; ++i, devId /= 10) {
+                ptr[device_id_length - 1 - i] = '0' + (devId % 10);
+            }
+
+            ptr += device_id_length;
+            *ptr++ = '-';
+
+            const size_t partition_id_length = kern::log(partitionId, 10) + 1;
+
+            for (size_t i = 0, partId = partitionId; i < partition_id_length; ++i, partId /= 10) {
+                ptr[partition_id_length - 1 - i] = '0' + (partId % 10);
+            }
+        }
+
+        return name;
+    }
+    
     FS::Response<size_t> Partition::Read(size_t offset, size_t count, uint8_t* buffer) {
         const uint64_t blockSize    = interface->GetBlockSize();
         const uint64_t startBlock   = offset / blockSize;
@@ -373,6 +412,22 @@ namespace Devices::Block {
         return FS::Response<size_t>(blocksToWrite * blockSize);
     }
 
+    void Partition::DestroyPartition() {
+        if (!removed) {
+            removed = true;
+
+            const size_t name_length = GetNameLength();
+            const auto name = GetName();
+
+            if (name) {
+                Kernel::Exports.deviceInterface->Remove({
+                    .NameLength = name_length,
+                    .Name = name.get()
+                });
+            }
+        }
+    }
+
     Optional<Device*> Device::AddDevice(Interface* interface) {
         if (interface == nullptr) {
             return Optional<Device*>();
@@ -392,38 +447,26 @@ namespace Devices::Block {
 
         kern::unique_ptr<Device> device_wrapper = kern::make_unique<Device>(interface, nextDeviceId++);
 
-        size_t devId = device_wrapper->GetDeviceId();
-
-        // simple integer log 10, + 1, used for device naming
-        size_t log10_id = 1;
-        for (size_t i = devId; i >= 10; i /= 10) {
-            log10_id++;
-        }
-
-        // block device naming follows "bdev{deviceId}"
-        // block device partition naming follows "bdev{deviceId}-{partitionId}"
-        // names are not null-terminated in the filesystem
-
-        char* device_name = static_cast<char*>(Heap::Allocate(4 + log10_id));
-        Utils::memcpy(device_name, "bdev", 4);
-
-        for (size_t i = 0; i < log10_id; ++i) {
-            device_name[4 + log10_id - 1 - i] = '0' + (devId % 10);
-            devId /= 10;
-        }
-
-        const size_t name_length = 4 + log10_id;
-
-        if (Kernel::Exports.deviceInterface->AddNode({
-            .NameLength = name_length,
-            .Name = device_name
-        }, device_wrapper.get()) != FS::Status::SUCCESS) {
-            Log::putsSafe("[DEV] Failed to add block device to filesystem");
-            Heap::Free(device_name);
+        if (!device_wrapper) {
+            Log::putsSafe("[DEV] Failed to allocate block device");
             return Optional<Device*>();
         }
 
-        Heap::Free(device_name);
+        const size_t name_length = device_wrapper->GetNameLength();
+        const auto device_name = device_wrapper->GetName();
+        
+        if (!device_name) {
+            Log::putsSafe("[DEV] Failed to allocate block device name");
+            return Optional<Device*>();
+        }
+
+        if (Kernel::Exports.deviceInterface->AddNode({
+            .NameLength = name_length,
+            .Name = device_name.get()
+        }, device_wrapper.get()) != FS::Status::SUCCESS) {
+            Log::putsSafe("[DEV] Failed to add block device to filesystem");
+            return Optional<Device*>();
+        }
 
         Device* device = device_wrapper.release();
 
@@ -486,6 +529,10 @@ namespace Devices::Block {
                 return Optional(device);
             }
 
+            device->partitions = kern::make_unique<Partition[]>(partition_count);
+
+            size_t current_partition = 0;
+
             while (partition_fetcher.HasNext()) {
                 auto entryOpt = partition_fetcher.Next();
 
@@ -509,11 +556,64 @@ namespace Devices::Block {
                 const uint64_t partition_first_block = entry.starting_lba;
                 const uint64_t partition_block_count = entry.ending_lba - entry.starting_lba + 1;
 
-                // create and add partition
+                auto* const partition = &device->partitions[current_partition];
+
+                new (partition) Partition(
+                    interface,
+                    device->GetDeviceId(),
+                    current_partition++,
+                    partition_first_block,
+                    partition_block_count
+                );
+
+                const size_t partition_name_length = partition->GetNameLength();
+                const auto partition_name = partition->GetName();
+
+                if (!partition_name) {
+                    Log::putsSafe("[DEV] Failed to allocate block device partition name");
+                    new (partition) Partition();
+                }
+                else {
+                    if (Kernel::Exports.deviceInterface->AddNode({
+                        .NameLength = partition_name_length,
+                        .Name = partition_name.get()
+                    }, partition) != FS::Status::SUCCESS) {
+                        Log::putsSafe("[DEV] Failed to add block device partition to filesystem");
+                        new (partition) Partition();
+                    }
+                }
             }
         }
 
         return Optional(device);
+    }
+
+    size_t Device::GetNameLength() const {
+        // name format is "bdev{deviceId}"
+        const size_t root_size = 4;
+        const size_t device_id_size = kern::log(deviceId, 10) + 1;
+        return root_size + device_id_size;
+    }
+
+    kern::unique_ptr<char[]> Device::GetName() const {
+        const size_t name_length = GetNameLength();
+        auto name = kern::make_unique<char[]>(name_length);
+
+        if (name) {
+            char* ptr = name.get();
+
+            Utils::memcpy(ptr, "bdev", 4);
+
+            ptr += 4;
+
+            const size_t device_id_length = kern::log(deviceId, 10) + 1;
+
+            for (size_t i = 0, devId = deviceId; i < device_id_length; ++i, devId /= 10) {
+                ptr[device_id_length - 1 - i] = '0' + (devId % 10);
+            }
+        }
+
+        return name;
     }
 
     FS::Response<size_t> Device::Read(size_t offset, size_t count, uint8_t* buffer) {
@@ -558,5 +658,28 @@ namespace Devices::Block {
         }
 
         return FS::Response<size_t>(blocksCount * blockSize);
+    }
+
+    void Device::DestroyDevice() {
+        if (!removed) {
+            removed = true;
+
+            for (size_t i = 0; i < partitionsCount; ++i) {
+                partitions[i].DestroyPartition();
+            }
+
+            const size_t name_length = GetNameLength();
+            const auto name = GetName();
+
+            if (name) {
+                Kernel::Exports.deviceInterface->Remove({
+                    .NameLength = name_length,
+                    .Name = name.get()
+                });
+            }
+        }
+
+        partitions.~unique_ptr();   // deallocate partitions array
+        Heap::Free(this);           // deallocate device
     }
 }

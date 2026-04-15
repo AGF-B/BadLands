@@ -38,21 +38,30 @@ namespace Devices {
             const uint64_t firstBlock;
             const uint64_t blocksCount;
 
+            const bool valid;
+            bool removed{false};
+
         public:
             Partition(Interface* interface, size_t deviceId, size_t partitionId, uint64_t firstBlock, uint64_t blocksCount)
                 : FS::File{nullptr}, interface{interface}, deviceId{deviceId},
-                partitionId{partitionId}, firstBlock{firstBlock}, blocksCount{blocksCount} {}
+                partitionId{partitionId}, firstBlock{firstBlock}, blocksCount{blocksCount}, valid{true} {}
+
+            Partition() : FS::File{nullptr}, interface{nullptr}, deviceId{0}, partitionId{0}, firstBlock{0}, blocksCount{0}, valid{false} {}
 
             inline constexpr size_t GetDeviceId() const { return deviceId; }
             inline constexpr size_t GetPartitionId() const { return partitionId; }
+            size_t GetNameLength() const;
+            kern::unique_ptr<char[]> GetName() const;
+
+            bool IsValid() const { return valid; }
 
             virtual FS::Response<size_t> Read(size_t offset, size_t count, uint8_t* buffer) final;
             virtual FS::Response<size_t> Write(size_t offset, size_t count, const uint8_t* buffer) final;
 
-            // Called by FS when unregistered, not deallocated as owned by the block device. Does nothing.
-            virtual void Destroy() final { }
+            // Called by FS when unregistered, not deallocated as owned by the block device. Only marks partition as removed.
+            inline constexpr virtual void Destroy() final { removed = true; }
             
-            // Called by the block device when cleaning up, deallocates the partition
+            // Called by block device. Removes partition from FS if not yet removed
             void DestroyPartition();
         };
 
@@ -66,18 +75,22 @@ namespace Devices {
             kern::unique_ptr<Partition[]> partitions{};
             size_t partitionsCount{0};
 
+            bool removed{false};
+
         public:
             Device(Interface* interface, size_t deviceId) : FS::File{nullptr}, interface{interface}, deviceId{deviceId} {}
 
             static Optional<Device*> AddDevice(Interface* interface);
 
             inline constexpr size_t GetDeviceId() const { return deviceId; }
+            size_t GetNameLength() const;
+            kern::unique_ptr<char[]> GetName() const;
 
             virtual FS::Response<size_t> Read(size_t offset, size_t count, uint8_t* buffer) final;
             virtual FS::Response<size_t> Write(size_t offset, size_t count, const uint8_t* buffer) final;
 
-            // Called by FS when unregistered, not deallocated as owned by the device driver. Does nothing.
-            virtual void Destroy() final { }
+            // Called by FS when unregistered, not deallocated as owned by the device driver. Only marks device as removed.
+            inline constexpr virtual void Destroy() final { removed = true; }
 
             // Called by the device driver when cleaning up, deallocates the device
             void DestroyDevice();
