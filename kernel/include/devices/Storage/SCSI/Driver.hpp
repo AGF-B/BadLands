@@ -19,6 +19,7 @@
 #include <shared/Response.hpp>
 
 #include <devices/Block/Interface.hpp>
+#include <devices/Block/Device.hpp>
 #include <devices/Storage/Controller.hpp>
 #include <devices/Storage/Driver.hpp>
 
@@ -41,6 +42,8 @@ namespace Devices {
                 };
 
                 bool use_extended_methods = false;
+
+                Block::Device* device{nullptr};
 
                 inline constexpr Driver(Storage::Controller& controller, uint8_t lun) : controller{controller}, lun{lun} { }
 

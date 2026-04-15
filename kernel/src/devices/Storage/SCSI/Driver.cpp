@@ -321,6 +321,7 @@ namespace Devices::Storage::SCSI {
     }
 
     void Driver::Destroy() {
+        device->DestroyDevice();
         Heap::Free(this);
     }
 
@@ -345,7 +346,17 @@ namespace Devices::Storage::SCSI {
             return Failure();
         }
 
-        Block::Device::AddDevice(this);
+        auto device_wrapper = Block::Device::AddDevice(this);
+
+        if (!device_wrapper.HasValue()) {
+            if constexpr (Debug::DEBUG_SCSI_ERRORS) {
+                Log::printfSafe("[SCSI] Failed to add block device for LUN %d\n\r", lun);
+            }
+
+            return Failure();
+        }
+
+        device = device_wrapper.GetValue();
 
         return Success();
     }
