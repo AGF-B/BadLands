@@ -273,6 +273,7 @@ namespace {
                     case VK_7: c = shift ? '&' : '7'; break;
                     case VK_8: c = shift ? '*' : '8'; break;
                     case VK_9: c = shift ? '(' : '9'; break;
+                    case VK_OEM_MINUS: c = shift ? '_' : '-'; break;
                     case VK_OEM_PERIOD: c = shift ? '>' : '.'; break;
                     case VK_OEM_COMMA: c = shift ? '<' : ','; break;
                     case VK_OEM_2: c = shift ? '?' : '/'; break; 
