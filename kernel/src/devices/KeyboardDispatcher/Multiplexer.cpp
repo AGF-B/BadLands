@@ -105,6 +105,10 @@ namespace {
 			return FS::Response(written_packets * PACKET_SIZE);
 		}
 
+		virtual FS::Status Query(const FS::QueryInfo& info) final {
+			return FS::Status::UNSUPPORTED;
+		}
+
 		virtual void Destroy() final {
 			Heap::Free(buffer);
 		}

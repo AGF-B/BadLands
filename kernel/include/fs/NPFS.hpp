@@ -34,6 +34,8 @@ protected:
         FS::Status              Remove(const FS::DirectoryEntry& fileref) final;
         FS::Response<size_t>    List(FS::DirectoryEntry* list, size_t length, size_t from = 0) final;
 
+        FS::Status              Query(const FS::QueryInfo& info) final;
+
         static Success          Construct(Directory* directory);
         void                    Destroy() final;
 
@@ -53,6 +55,8 @@ protected:
 
         FS::Response<size_t> Read(size_t offset, size_t count, uint8_t* buffer) final;
         FS::Response<size_t> Write(size_t offset, size_t count, const uint8_t* buffer) final;
+
+        FS::Status           Query(const FS::QueryInfo& info) final;
 
         static Success      Construct(File* file);
         void                Destroy() final;

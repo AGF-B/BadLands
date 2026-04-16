@@ -536,6 +536,10 @@ FS::Response<size_t> NPFS::Directory::List(FS::DirectoryEntry* list, size_t leng
     return FS::Response(length - remaining);
 }
 
+FS::Status NPFS::Directory::Query(const FS::QueryInfo& info) {
+    return FS::Status::UNSUPPORTED;
+}
+
 Success NPFS::Directory::Construct(Directory* directory) {
     DirectoryData* data = static_cast<DirectoryData*>(Heap::Allocate(sizeof(DirectoryData)));
 
@@ -734,6 +738,10 @@ FS::Response<size_t> NPFS::File::Write(size_t offset, size_t count, const uint8_
     }
 
     return FS::Response<size_t>(bufferEnd - buffer);
+}
+
+FS::Status NPFS::File::Query(const FS::QueryInfo& info) {
+    return FS::Status::UNSUPPORTED;
 }
 
 Success NPFS::File::Construct(File* file) {

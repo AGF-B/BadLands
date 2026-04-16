@@ -127,6 +127,8 @@ namespace {
     };
 
     struct GPT {
+        using GUID = Devices::Block::GUID;
+        
         uint64_t signature;
         uint32_t revision;
         uint32_t header_size;
@@ -136,7 +138,7 @@ namespace {
         uint64_t alternate_lba;
         uint64_t first_usable_lba;
         uint64_t last_usable_lba;
-        uint8_t  disk_guid[16];
+        GUID     disk_guid;
         uint64_t partition_entries_lba;
         uint32_t partition_entry_count;
         uint32_t partition_entry_size;
@@ -221,8 +223,10 @@ namespace {
     };
 
     struct GPTPartitionEntry {
-        uint8_t partition_type_guid[16];
-        uint8_t unique_partition_guid[16];
+        using GUID = Devices::Block::GUID;
+
+        GUID partition_type_guid;
+        GUID unique_partition_guid;
         uint64_t starting_lba;
         uint64_t ending_lba;
         uint64_t attributes;
@@ -412,6 +416,34 @@ namespace Devices::Block {
         return FS::Response<size_t>(blocksToWrite * blockSize);
     }
 
+    FS::Status Partition::Query(const FS::QueryInfo& info) {
+        const Queries query(info.queryId);
+
+        switch (query) {
+        case Queries::INVALID:
+            return FS::Status::INVALID_PARAMETER;
+        
+        case Queries::GET_PARTITION_TYPE_GUID:
+            if (info.queryResultSize < sizeof(GUID) || info.queryResult == nullptr) {
+                return FS::Status::INVALID_PARAMETER;
+            }
+            Utils::memcpy(info.queryResult, typeGUID.data, sizeof(GUID));
+
+            return FS::Status::SUCCESS;
+
+        case Queries::GET_PARTITION_UNIQUE_GUID:
+            if (info.queryResultSize < sizeof(GUID) || info.queryResult == nullptr) {
+                return FS::Status::INVALID_PARAMETER;
+            }
+            Utils::memcpy(info.queryResult, uniqueGUID.data, sizeof(GUID));
+
+            return FS::Status::SUCCESS;
+
+        default:
+            return FS::Status::INVALID_PARAMETER;
+        }
+    }
+
     void Partition::DestroyPartition() {
         if (!removed) {
             removed = true;
@@ -491,6 +523,8 @@ namespace Devices::Block {
                 return Optional(device);
             }
 
+            device->SetGUID(gpt->disk_guid, false);
+
             auto partition_fetcher = GPTPartitionFetcher(gpt, interface->GetBlockSize(), interface, 32);
             
             if (!partition_fetcher.Initialize().IsSuccess()) {
@@ -530,6 +564,7 @@ namespace Devices::Block {
             }
 
             device->partitions = kern::make_unique<Partition[]>(partition_count);
+            device->partitionsCount = partition_count;
 
             size_t current_partition = 0;
 
@@ -563,7 +598,9 @@ namespace Devices::Block {
                     device->GetDeviceId(),
                     current_partition++,
                     partition_first_block,
-                    partition_block_count
+                    partition_block_count,
+                    entry.partition_type_guid,
+                    entry.unique_partition_guid
                 );
 
                 const size_t partition_name_length = partition->GetNameLength();
@@ -583,6 +620,9 @@ namespace Devices::Block {
                     }
                 }
             }
+        }
+        else {
+            /// TODO: handle MBR partitions
         }
 
         return Optional(device);
@@ -658,6 +698,34 @@ namespace Devices::Block {
         }
 
         return FS::Response<size_t>(blocksCount * blockSize);
+    }
+
+    FS::Status Device::Query(const FS::QueryInfo& info) {
+        const Queries query(info.queryId);
+
+        switch (query) {
+        case Queries::INVALID:
+            return FS::Status::INVALID_PARAMETER;
+
+        case Queries::GET_DISK_GUID:
+            if (info.queryResultSize < sizeof(GUID) || info.queryResult == nullptr) {
+                return FS::Status::INVALID_PARAMETER;
+            }
+            Utils::memcpy(info.queryResult, diskGUID.data, sizeof(GUID));
+
+            return FS::Status::SUCCESS;
+
+        case Queries::GET_DISK_PARTITION_COUNT:
+            if (info.queryResultSize < sizeof(uint64_t) || info.queryResult == nullptr) {
+                return FS::Status::INVALID_PARAMETER;
+            }
+            *reinterpret_cast<uint64_t*>(info.queryResult) = partitionsCount;
+
+            return FS::Status::SUCCESS;
+        
+        default:
+            return FS::Status::INVALID_PARAMETER;
+        }
     }
 
     void Device::DestroyDevice() {

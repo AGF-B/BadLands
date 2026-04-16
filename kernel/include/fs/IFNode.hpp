@@ -29,6 +29,14 @@ namespace FS {
         const char* Name;
     };
 
+    struct QueryInfo {
+        size_t queryId;
+        size_t queryDataSize;
+        size_t queryResultSize;
+        void* queryData;
+        void* queryResult;
+    };
+
     enum class FileType {
         FILE,
         DIRECTORY
@@ -59,6 +67,8 @@ namespace FS {
 
         virtual Response<size_t>    Read(size_t offset, size_t count, uint8_t* buffer) = 0;
         virtual Response<size_t>    Write(size_t offset, size_t count, const uint8_t* buffer) = 0;
+
+        virtual Status              Query(const QueryInfo& info) = 0;
 
     protected:
         virtual void Destroy() = 0;
