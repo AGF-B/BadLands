@@ -17,6 +17,7 @@
 #include <cstddef>
 #include <cstdint>
 
+#include <shared/Lock.hpp>
 #include <shared/Response.hpp>
 
 #include <devices/Block/Interface.hpp>
@@ -50,7 +51,11 @@ namespace Devices {
             const GUID uniqueGUID;
 
             const bool valid;
-            bool removed{false};
+
+            Utils::Lock state_lock{};
+            bool destroyed{false};
+
+            void ReleaseResources();
 
         public:
             class Queries {
@@ -115,10 +120,10 @@ namespace Devices {
 
             virtual FS::Status Query(const FS::QueryInfo& info) final;
 
-            // Called by FS when unregistered, not deallocated as owned by the block device. Only marks partition as removed.
-            inline constexpr virtual void Destroy() final { removed = true; }
+            // Called by FS when unregistered
+            virtual void Destroy() final;
             
-            // Called by block device. Removes partition from FS if not yet removed
+            // Called by block device
             void DestroyPartition();
         };
 
@@ -135,12 +140,16 @@ namespace Devices {
             GUID diskGUID;
             bool hasShortGUID{false};
 
-            bool removed{false};
+            Utils::Lock state_lock{};
+            bool destroyed{false};
+            bool partitions_removed{false};
 
-            inline void SetGUID(const GUID& diskGUID, bool isShortGUID) {
+            inline constexpr void SetGUID(const GUID& diskGUID, bool isShortGUID) {
                 this->diskGUID = diskGUID;
                 hasShortGUID = isShortGUID;
             }
+
+            void ReleaseResources(bool removed_partitions);
 
         public:
             class Queries {
@@ -188,10 +197,10 @@ namespace Devices {
 
             virtual FS::Status Query(const FS::QueryInfo& info) final;
 
-            // Called by FS when unregistered, not deallocated as owned by the device driver. Only marks device as removed.
-            inline constexpr virtual void Destroy() final { removed = true; }
+            // Called by FS when unregistered
+            virtual void Destroy() final;
 
-            // Called by the device driver when cleaning up, deallocates the device
+            // Called by the device driver
             void DestroyDevice();
         };
     }

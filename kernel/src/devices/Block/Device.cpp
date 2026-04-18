@@ -16,6 +16,7 @@
 
 #include <new>
 
+#include <shared/LockGuard.hpp>
 #include <shared/Response.hpp>
 
 #include <crypto/crc.hpp>
@@ -444,20 +445,35 @@ namespace Devices::Block {
         }
     }
 
-    void Partition::DestroyPartition() {
-        if (!removed) {
-            removed = true;
+    void Partition::ReleaseResources() {
+        {
+            Utils::LockGuard _{state_lock};
 
-            const size_t name_length = GetNameLength();
-            const auto name = GetName();
-
-            if (name) {
-                Kernel::Exports.deviceInterface->Remove({
-                    .NameLength = name_length,
-                    .Name = name.get()
-                });
+            if (destroyed) {
+                return;
+            }
+            else {
+                destroyed = true;
             }
         }
+
+        size_t name_length = GetNameLength();
+        auto name = GetName();
+
+        if (name) {
+            Kernel::Exports.deviceInterface->Remove({
+                .NameLength = name_length,
+                .Name = name.get()
+            });
+        }
+    }
+
+    void Partition::Destroy() {
+        ReleaseResources();
+    }
+
+    void Partition::DestroyPartition() {
+        ReleaseResources();
     }
 
     Optional<Device*> Device::AddDevice(Interface* interface) {
@@ -728,26 +744,56 @@ namespace Devices::Block {
         }
     }
 
-    void Device::DestroyDevice() {
-        if (!removed) {
-            removed = true;
+    void Device::ReleaseResources(bool remove_partitions) {
+        state_lock.lock();
 
-            for (size_t i = 0; i < partitionsCount; ++i) {
-                partitions[i].DestroyPartition();
+        if (destroyed) {
+            if (!partitions_removed) {
+                for (size_t i = 0; i < partitionsCount; ++i) {
+                    if (partitions[i].IsValid()) {
+                        partitions[i].DestroyPartition();
+                    }
+                }
             }
+ 
+            partitions.~unique_ptr();   // deallocate partitions array
+            Heap::Free(this);           // deallocate device
 
-            const size_t name_length = GetNameLength();
-            const auto name = GetName();
-
-            if (name) {
-                Kernel::Exports.deviceInterface->Remove({
-                    .NameLength = name_length,
-                    .Name = name.get()
-                });
-            }
+            // state_lock not unlocked as the device memory was just freed
+            return;
+        }
+        else {
+            destroyed = true;
         }
 
-        partitions.~unique_ptr();   // deallocate partitions array
-        Heap::Free(this);           // deallocate device
+        if (remove_partitions) {
+            for (size_t i = 0; i < partitionsCount; ++i) {
+                if (partitions[i].IsValid()) {
+                    partitions[i].DestroyPartition();
+                }
+            }
+
+            partitions_removed = true;
+        }
+
+        const size_t name_length = GetNameLength();
+        const auto name = GetName();
+
+        state_lock.unlock();
+
+        if (name) {
+            Kernel::Exports.deviceInterface->Remove({
+                .NameLength = name_length,
+                .Name = name.get()
+            });
+        }
+    }
+
+    void Device::Destroy() {
+        ReleaseResources(false);
+    }
+
+    void Device::DestroyDevice() {
+        ReleaseResources(true);
     }
 }
