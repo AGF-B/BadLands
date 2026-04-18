@@ -218,7 +218,7 @@ namespace Devices {
                 void ReleasePorts();
 
                 int16_t EnableSlot(uint8_t slot_type);
-                void DisableSlot(uint8_t id) const;
+                void DisableSlot(uint8_t id);
 
                 ExtendedCapability* FindExtendedCapability(uint8_t id) const;
                 ExtendedCapability* FindNextExtendedCapability(uint8_t id, ExtendedCapability* ptr) const;

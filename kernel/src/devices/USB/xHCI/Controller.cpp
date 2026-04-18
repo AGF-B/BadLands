@@ -788,7 +788,7 @@ namespace Devices::USB::xHCI {
     }
 
     int16_t Controller::EnableSlot(uint8_t slot_type) {
-        EnableSlotTRB trb = EnableSlotTRB::Create(GetCommandCycle(), slot_type);
+        const EnableSlotTRB trb = EnableSlotTRB::Create(GetCommandCycle(), slot_type);
 
         auto result = SendCommand(trb);
 
@@ -805,9 +805,9 @@ namespace Devices::USB::xHCI {
         return slot_id;
     }
 
-    void Controller::DisableSlot(uint8_t id) const {
-        (void)id;
-        Panic::PanicShutdown("UNIMPLEMENTED XHCI CONTROLLER METHOD: DisableSlot\n\r");
+    void Controller::DisableSlot(uint8_t id) {
+        const DisableSlotTRB trb = DisableSlotTRB::Create(GetCommandCycle(), id);
+        SendCommand(trb);
     }
 
     Controller::ExtendedCapability* Controller::FindExtendedCapability(uint8_t id) const {

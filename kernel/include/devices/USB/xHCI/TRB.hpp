@@ -128,6 +128,10 @@ namespace Devices {
                 static EnableSlotTRB Create(bool cycle, uint8_t slot_type);
             };
 
+            struct DisableSlotTRB : public CommandTRB {
+                static DisableSlotTRB Create(bool cycle, uint8_t slot_id);
+            };
+
             struct AddressDeviceTRB : public CommandTRB {
                 static AddressDeviceTRB Create(bool cycle, bool bsr, uint8_t slot_id, const void* context_pointer);
             };

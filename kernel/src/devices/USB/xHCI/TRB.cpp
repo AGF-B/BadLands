@@ -143,6 +143,23 @@ namespace Devices::USB::xHCI {
         return trb;
     }
 
+    DisableSlotTRB DisableSlotTRB::Create(bool cycle, uint8_t slot_id) {
+        static constexpr uint8_t DISABLE_SLOT_TYPE = 10;
+
+        DisableSlotTRB trb;
+
+        trb.data[0] = 0;
+        trb.data[1] = 0;
+        trb.data[2] = 0;
+        trb.data[3] = 0;
+
+        trb.SetCycle(cycle);
+        trb.SetTRBType(DISABLE_SLOT_TYPE);
+        trb.SetSlotID(slot_id);
+
+        return trb;
+    }
+
     AddressDeviceTRB AddressDeviceTRB::Create(bool cycle, bool bsr, uint8_t slot_id, const void* context_pointer) {
         static constexpr uint8_t    ADDRESS_DEVICE_TYPE     = 11;
         static constexpr uint64_t   CONTEXT_POINTER_MASK    = 0xFFFFFFFFFFFFFFF0;
