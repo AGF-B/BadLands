@@ -462,33 +462,40 @@ FS::Status NPFS::Directory::AddNode(const FS::DirectoryEntry& fileref, FS::IFNod
     return status;
 }
 
-FS::Status NPFS::Directory::Remove(const FS::DirectoryEntry& fileref) {
-    Utils::LockGuard _{mut};
+FS::Status NPFS::Directory::Remove(const FS::DirectoryEntry& fileref) {    
+    FS::IFNode* node = nullptr;
+    
+    {
+        Utils::LockGuard _{mut};
 
-    auto result = FindEntry(fileref);
+        auto result = FindEntry(fileref);
 
-    if (result.CheckError()) {
-        return result.GetError();
+        if (result.CheckError()) {
+            return result.GetError();
+        }
+
+        DirectoryEntry* entry = result.GetValue();
+
+        node = entry->node;
+        auto status = node->Open();
+
+        if (status == FS::Status::SUCCESS) {
+            node->MarkForRemoval();
+
+            Heap::Free(const_cast<char*>(entry->name));
+            entry->name = nullptr;
+            entry->length = 0;
+            entry->node = nullptr;
+        }
+        else if (status != FS::Status::UNAVAILABLE) {
+            return status;
+        }
+        else {
+            return FS::Status::SUCCESS;
+        }
     }
 
-    DirectoryEntry* entry = result.GetValue();
-
-    auto node = entry->node;
-    auto status = node->Open();
-
-    if (status == FS::Status::SUCCESS) {
-        node->MarkForRemoval();
-
-        Heap::Free(const_cast<char*>(entry->name));
-        entry->name = nullptr;
-        entry->length = 0;
-        entry->node = nullptr;
-
-        node->Close();
-    }
-    else if (status != FS::Status::UNAVAILABLE) {
-        return status;
-    }
+    node->Close();
 
     return FS::Status::SUCCESS;
 }
@@ -536,7 +543,7 @@ FS::Response<size_t> NPFS::Directory::List(FS::DirectoryEntry* list, size_t leng
     return FS::Response(length - remaining);
 }
 
-FS::Status NPFS::Directory::Query(const FS::QueryInfo& info) {
+FS::Status NPFS::Directory::Query([[maybe_unused]] const FS::QueryInfo& info) {
     return FS::Status::UNSUPPORTED;
 }
 
@@ -559,7 +566,7 @@ Success NPFS::Directory::Construct(Directory* directory) {
 void NPFS::Directory::Destroy() {
     DirectoryData* data = static_cast<DirectoryData*>(container);
 
-    // TODO: mark all files for deletion
+    /// TODO: mark all files for deletion
 
     data->data.Destroy();
 
@@ -740,7 +747,7 @@ FS::Response<size_t> NPFS::File::Write(size_t offset, size_t count, const uint8_
     return FS::Response<size_t>(bufferEnd - buffer);
 }
 
-FS::Status NPFS::File::Query(const FS::QueryInfo& info) {
+FS::Status NPFS::File::Query([[maybe_unused]] const FS::QueryInfo& info) {
     return FS::Status::UNSUPPORTED;
 }
 
