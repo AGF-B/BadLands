@@ -22,7 +22,7 @@ qemu-system-x86_64 \
 -machine q35 \
 -cpu max,host-phys-bits=on,+avx,enforce \
 -device nec-usb-xhci,id=xhci \
--device usb-storage,bus=xhci.0,drive=boot_drive \
+-device usb-storage,bus=xhci.0,drive=boot_drive,id=boot_drive \
 -device usb-kbd \
 -rtc base=localtime \
 -net none \
