@@ -105,7 +105,7 @@ namespace {
 			return FS::Response(written_packets * PACKET_SIZE);
 		}
 
-		virtual FS::Status Query(const FS::QueryInfo& info) final {
+		virtual FS::Status Query([[maybe_unused]] const FS::QueryInfo& info) final {
 			return FS::Status::UNSUPPORTED;
 		}
 
