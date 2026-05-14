@@ -31,8 +31,8 @@ namespace FS {
     void IFNode::Close() {
         --openReferences;
 
-        if (ShouldBeRemoved() && openReferences == 0) {
-            Destroy();
+        if (openReferences == 0) {
+            Destroy(ShouldBeRemoved());
         }
     }
 

@@ -563,15 +563,17 @@ Success NPFS::Directory::Construct(Directory* directory) {
     return Success();
 }
 
-void NPFS::Directory::Destroy() {
-    DirectoryData* data = static_cast<DirectoryData*>(container);
+void NPFS::Directory::Destroy(bool deleted) {
+    if (deleted) {
+        DirectoryData* data = static_cast<DirectoryData*>(container);
 
-    /// TODO: mark all files for deletion
+        /// TODO: mark all files for deletion
 
-    data->data.Destroy();
+        data->data.Destroy();
 
-    Heap::Free(data);
-    Heap::Free(this);
+        Heap::Free(data);
+        Heap::Free(this);
+    }
 }
 
 NPFS::File::File(FS::Owner* owner) : FS::File(owner) {}
@@ -769,13 +771,15 @@ Success NPFS::File::Construct(File* file) {
     return Success();
 }
 
-void NPFS::File::Destroy() {
-    FileData* data = static_cast<FileData*>(container);
+void NPFS::File::Destroy(bool deleted) {
+    if (deleted) {
+        FileData* data = static_cast<FileData*>(container);
 
-    data->data.Destroy();
+        data->data.Destroy();
 
-    Heap::Free(data);
-    Heap::Free(this);
+        Heap::Free(data);
+        Heap::Free(this);
+    }
 }
 
 NPFS::NPFS() : root(this) {}

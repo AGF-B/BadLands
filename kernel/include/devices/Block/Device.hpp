@@ -121,7 +121,7 @@ namespace Devices {
             virtual FS::Status Query(const FS::QueryInfo& info) final;
 
             // Called by FS when unregistered
-            virtual void Destroy() final;
+            virtual void Destroy(bool deleted) final;
             
             // Called by block device
             void DestroyPartition();
@@ -198,7 +198,7 @@ namespace Devices {
             virtual FS::Status Query(const FS::QueryInfo& info) final;
 
             // Called by FS when unregistered
-            virtual void Destroy() final;
+            virtual void Destroy(bool deleted) final;
 
             // Called by the device driver
             void DestroyDevice();

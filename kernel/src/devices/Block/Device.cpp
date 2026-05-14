@@ -468,8 +468,10 @@ namespace Devices::Block {
         }
     }
 
-    void Partition::Destroy() {
-        ReleaseResources();
+    void Partition::Destroy(bool deleted) {
+        if (deleted) {
+            ReleaseResources();
+        }
     }
 
     void Partition::DestroyPartition() {
@@ -760,37 +762,38 @@ namespace Devices::Block {
             Heap::Free(this);           // deallocate device
 
             // state_lock not unlocked as the device memory was just freed
-            return;
         }
         else {
             destroyed = true;
-        }
 
-        if (remove_partitions) {
-            for (size_t i = 0; i < partitionsCount; ++i) {
-                if (partitions[i].IsValid()) {
-                    partitions[i].DestroyPartition();
+            if (remove_partitions) {
+                for (size_t i = 0; i < partitionsCount; ++i) {
+                    if (partitions[i].IsValid()) {
+                        partitions[i].DestroyPartition();
+                    }
                 }
+
+                partitions_removed = true;
             }
 
-            partitions_removed = true;
-        }
+            const size_t name_length = GetNameLength();
+            const auto name = GetName();
 
-        const size_t name_length = GetNameLength();
-        const auto name = GetName();
+            state_lock.unlock();
 
-        state_lock.unlock();
-
-        if (name) {
-            Kernel::Exports.deviceInterface->Remove({
-                .NameLength = name_length,
-                .Name = name.get()
-            });
+            if (name) {
+                Kernel::Exports.deviceInterface->Remove({
+                    .NameLength = name_length,
+                    .Name = name.get()
+                });
+            }
         }
     }
 
-    void Device::Destroy() {
-        ReleaseResources(false);
+    void Device::Destroy(bool deleted) {
+        if (deleted) {
+            ReleaseResources(false);
+        }
     }
 
     void Device::DestroyDevice() {

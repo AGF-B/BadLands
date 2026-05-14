@@ -37,7 +37,7 @@ protected:
         FS::Status              Query(const FS::QueryInfo& info) final;
 
         static Success          Construct(Directory* directory);
-        void                    Destroy() final;
+        void                    Destroy(bool deleted) final;
 
     private:
         struct DirectoryEntry;
@@ -59,7 +59,7 @@ protected:
         FS::Status           Query(const FS::QueryInfo& info) final;
 
         static Success      Construct(File* file);
-        void                Destroy() final;
+        void                Destroy(bool deleted) final;
     
     private:
         void* container;

@@ -109,8 +109,10 @@ namespace {
 			return FS::Status::UNSUPPORTED;
 		}
 
-		virtual void Destroy() final {
-			Heap::Free(buffer);
+		virtual void Destroy(bool deleted) final {
+			if (deleted) {
+				Heap::Free(buffer);
+			}
 		}
 	};
 }

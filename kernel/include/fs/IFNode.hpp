@@ -71,7 +71,7 @@ namespace FS {
         virtual Status              Query(const QueryInfo& info) = 0;
 
     protected:
-        virtual void Destroy() = 0;
+        virtual void Destroy(bool deleted) = 0;
 
         Owner* const owner;
 
