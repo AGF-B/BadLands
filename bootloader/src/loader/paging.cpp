@@ -554,6 +554,7 @@ void Loader::SetupLoaderInfo(
     }
 
     uint8_t* ptr = static_cast<uint8_t*>(MakeshiftMalloc(mmap, total_pages));
+
     if (ptr == nullptr) {
         // unsolable error, restart machine
         EFI::sys->RuntimeServices->ResetSystem(EfiResetCold, EFI_OUT_OF_RESOURCES, 0, nullptr);
@@ -577,6 +578,12 @@ void Loader::SetupLoaderInfo(
     *(reinterpret_cast<EFI_PHYSICAL_ADDRESS*>(
         ptr + ShdMem::Layout::OsLoaderDataOffsets.AcpiRSDP
     )) = reinterpret_cast<EFI_PHYSICAL_ADDRESS>(ldInfo.RSDP);
+
+    Loader::memcpy(
+        ptr + ShdMem::Layout::OsLoaderDataOffsets.RootUUID,
+        ldInfo.BootConfig.root_partition_uuid,
+        sizeof(ldInfo.BootConfig.root_partition_uuid)
+    );
 
     *(reinterpret_cast<uint64_t*>(
         ptr + ShdMem::Layout::OsLoaderDataOffsets.MmapSize)) = mmap.mmap_size;

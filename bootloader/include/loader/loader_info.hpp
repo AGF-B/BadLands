@@ -20,6 +20,7 @@
 #include <shared/graphics/basic.hpp>
 #include <shared/memory/layout.hpp>
 
+#include <loader/boot_config.hpp>
 #include <loader/kernel_loader.hpp>
 
 struct EfiMemoryMap {
@@ -37,4 +38,5 @@ struct LoaderInfo {
     EFI_PHYSICAL_ADDRESS PCIe_ECAM_0;               //  physical address of the first ECAM entry in the MCFG ACPI table
     uint64_t AcpiRevision;                          //  ACPI Revision
     void* RSDP;                                     //  ACPI RSDP
+    BOOT_CONFIGURATION BootConfig;                  //  boot configuration read from the boot.cfg file
 };

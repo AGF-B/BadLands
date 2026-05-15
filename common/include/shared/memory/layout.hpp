@@ -92,7 +92,8 @@ namespace Shared {
                 size_t PCIeECAM0    = RTServices    + sizeof(EFI_RUNTIME_SERVICES*);
                 size_t AcpiRevision = PCIeECAM0     + sizeof(EFI_PHYSICAL_ADDRESS);
                 size_t AcpiRSDP     = AcpiRevision  + sizeof(uint64_t);
-                size_t MmapSize     = AcpiRSDP      + sizeof(EFI_PHYSICAL_ADDRESS);
+                size_t RootUUID     = AcpiRSDP      + sizeof(EFI_PHYSICAL_ADDRESS);
+                size_t MmapSize     = RootUUID      + sizeof(EFI_GUID);
                 size_t MmapDescSize = MmapSize      + sizeof(uint64_t);
                 size_t Mmap         = MmapDescSize  + sizeof(uint64_t);
             } OsLoaderDataOffsets;

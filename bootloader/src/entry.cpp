@@ -84,7 +84,7 @@ LEGACY_EXPORT EFIAPI int EfiEntry(EFI_HANDLE handle, EFI_SYSTEM_TABLE* _sys) {
     ldInfo.gfxData = Loader::LoadGraphics();
     Loader::LoadFont(handle, pml4, PI);
 
-    BOOT_CONFIGURATION BootConfig = Loader::GetBootConfiguration(handle);
+    ldInfo.BootConfig = Loader::GetBootConfiguration(handle);
 
     Loader::PrepareEFIRemap(pml4, PI);
     Loader::RemapGOP(pml4, ldInfo.gfxData, PI);
