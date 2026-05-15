@@ -36,6 +36,7 @@ add_executable(EFI_BOOTX64
     "src/ldstdlib/memory.cpp"
     "src/loader/acpi_check.cpp"
     "src/loader/basic_graphics.cpp"
+    "src/loader/boot_config.cpp"
     "src/loader/kernel_loader.cpp"
     "src/loader/paging.cpp"
     "src/loader/pci.cpp"

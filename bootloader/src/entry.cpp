@@ -10,7 +10,7 @@
 // See the GNU General Public License for more details.
 //
 // You should have received a copy of the GNU General Public License along with this program.
-// If not, see <https://www.gnu.org/licenses/>. 
+// If not, see <https://www.gnu.org/licenses/>.
 
 #include <efi/efi_misc.hpp>
 #include <shared/efi/efi.h>
@@ -20,6 +20,7 @@
 
 #include <loader/acpi_check.hpp>
 #include <loader/basic_graphics.hpp>
+#include <loader/boot_config.hpp>
 #include <loader/kernel_loader.hpp>
 #include <loader/loader_info.hpp>
 #include <loader/paging.hpp>
@@ -82,6 +83,8 @@ LEGACY_EXPORT EFIAPI int EfiEntry(EFI_HANDLE handle, EFI_SYSTEM_TABLE* _sys) {
     KernelLI = Loader::LoadKernel(handle, pml4, PI);
     ldInfo.gfxData = Loader::LoadGraphics();
     Loader::LoadFont(handle, pml4, PI);
+
+    BOOT_CONFIGURATION BootConfig = Loader::GetBootConfiguration(handle);
 
     Loader::PrepareEFIRemap(pml4, PI);
     Loader::RemapGOP(pml4, ldInfo.gfxData, PI);
@@ -187,10 +190,8 @@ LEGACY_EXPORT EFIAPI int EfiEntry(EFI_HANDLE handle, EFI_SYSTEM_TABLE* _sys) {
     Loader::SetupLoaderInfo(pml4, ldInfo, PI, mmap);
 
     __asm__ volatile("mov %0, %%cr3" :: "r"(pml4) : "memory");
-
     __asm__ volatile("mov %0, %%rax" :: "m"(KernelLI.EntryPoint));
     __asm__ volatile("callq *%rax");
-    __asm__ volatile("jmp .");
 
     while (1) {
         __asm__ volatile("hlt");
