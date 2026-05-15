@@ -15,6 +15,7 @@
 .vs/
 .vscode/
 build/
+simulation/boot.cfg
 simulation/disk.img
 simulation/qemu.log
 simulation/*.fd
