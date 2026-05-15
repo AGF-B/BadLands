@@ -1,3 +1,5 @@
+#!/bin/bash
+
 # SPDX-License-Identifier: GPL-3.0-only
 #
 # Copyright (C) 2026 Alexandre Boissiere
@@ -17,12 +19,28 @@ cd simulation
 
 if [ ! -f disk.img ]; then
     dd if=/dev/zero of=disk.img bs=4M count=12
-    parted -s disk.img mklabel gpt mkpart primary fat32 1MiB 36MiB set 1 esp on
+
+    root_partition_uuid=$(uuidgen)
+
+    sgdisk -Z disk.img \
+        -n 1:2048:73727 \
+        -u 1:R \
+        -t 1:ef00 \
+        -c 1:EFI \
+        -n 2:73728 \
+        -u 2:$root_partition_uuid \
+        -t 2:0700 \
+        -c 2:ROOT
+
+    echo "root=$root_partition_uuid" > boot.cfg
+    
     mkfs.fat -F 32 --offset 2048 -h 2048 disk.img 35840
+
     mmd -i disk.img@@1M ::/EFI
-    mmd -i disk.img@@1M ::/EFI/BOOT 
+    mmd -i disk.img@@1M ::/EFI/BOOT
 fi
 
 mcopy -o -Q -i disk.img@@1M ../build/BOOTX64.EFI ::/EFI/BOOT
 mcopy -o -Q -i disk.img@@1M ../build/kernel.img ::/EFI/BOOT
 mcopy -o -Q -i disk.img@@1M ../assets/psf_font.psf ::/EFI/BOOT
+mcopy -o -Q -i disk.img@@1M boot.cfg ::/EFI/BOOT
