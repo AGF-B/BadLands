@@ -28,6 +28,7 @@
 #include <devices/PS2/Controller.hpp>
 #include <devices/PS2/Keyboard.hpp>
 
+#include <fs/Root.hpp>
 #include <fs/VFS.hpp>
 
 #include <interrupts/APIC.hpp>
@@ -72,6 +73,7 @@ namespace {
         }
 
         Runtime::Initialize();
+        FS::InitializeRootPartitionDetection();
     }
 
     static inline void SetupPhysicalMemory() {

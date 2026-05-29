@@ -59,6 +59,7 @@ add_executable(KERNEL_IMG
     "src/devices/Storage/SCSI/Driver.cpp"
     "src/fs/IFNode.cpp"
     "src/fs/NPFS.cpp"
+    "src/fs/Root.cpp"
     "src/fs/VFS.cpp"
     "src/interrupts/core/PageFault.cpp"
     "src/interrupts/APIC.cpp"
