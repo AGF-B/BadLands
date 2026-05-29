@@ -10,24 +10,19 @@
 // See the GNU General Public License for more details.
 //
 // You should have received a copy of the GNU General Public License along with this program.
-// If not, see <https://www.gnu.org/licenses/>. 
+// If not, see <https://www.gnu.org/licenses/>.
 
 #pragma once
 
 #include <cstddef>
 
+#include <concepts>
+#include <type_traits>
+
 #include <shared/Response.hpp>
 
-#include <mm/MemoryProvider.hpp>
-
-class Heap {
-private:
-	static inline bool initialized = false;
-
-public:
-	static Success 	Create(); 
-	static void* 	Allocate(size_t size);
-	static void 	Free(void* ptr);
+template<typename T>
+concept MemoryProvider = requires {
+    { T::Allocate(size_t{}) } -> std::same_as<void*>;
+    { T::Free(nullptr) } -> std::same_as<void>;
 };
-
-static_assert(MemoryProvider<Heap>);

@@ -17,6 +17,7 @@
 
 #include <shared/Lock.hpp>
 #include <shared/LockGuard.hpp>
+#include <shared/Response.hpp>
 #include <shared/memory/defs.hpp>
 
 #include <mm/PhysicalMemory.hpp>
@@ -516,8 +517,19 @@ namespace {
 	static AVLHeap heap;
 }
 
-bool Heap::Create() {
-	return CreateAVLHeap(heap);
+Success Heap::Create() {
+	if (initialized) {
+		return Success();
+	}
+	else {
+		if (CreateAVLHeap(heap)) {
+			initialized = true;
+			return Success();
+		}
+		else {
+			return Failure();
+		}
+	}
 }
 
 void* Heap::Allocate(size_t size) {

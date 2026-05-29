@@ -18,8 +18,25 @@
 
 #include <shared/Response.hpp>
 
-namespace IOHeap {
-    Success Create(); 
-    void* Allocate(size_t size, size_t alignment = 8);
-    void Free(void* ptr);
-}
+#include <mm/MemoryProvider.hpp>
+
+class IOHeap {
+private:
+    struct Metadata {
+        uint32_t padding;
+        uint32_t size;
+        Metadata* next;
+    };
+
+    static inline Metadata* head = nullptr;
+
+    static void Coalesce(Metadata* current);
+
+public:
+    static Success  Create();
+    static void*    Allocate(size_t size);
+    static void*    Allocate(size_t size, size_t alignment);
+    static void     Free(void* ptr);
+};
+
+static_assert(MemoryProvider<IOHeap>);
