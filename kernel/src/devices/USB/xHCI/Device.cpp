@@ -71,9 +71,9 @@ namespace Devices::USB::xHCI {
     }
 
     Success Device::InterfaceDescriptor::AddAlternate(const InterfaceDescriptor& alternate) {
-        InterfaceDescriptor* const new_alternate = reinterpret_cast<InterfaceDescriptor*>(Heap::Allocate(sizeof(InterfaceDescriptor)));
+        auto new_alternate = kern::make_unique<InterfaceDescriptor>();
 
-        if (new_alternate == nullptr) {
+        if (!new_alternate) {
             return Failure();
         }
 
@@ -82,14 +82,14 @@ namespace Devices::USB::xHCI {
         InterfaceDescriptor* current = nextAlternate;
 
         if (nextAlternate == nullptr) {
-            nextAlternate = new_alternate;
+            nextAlternate = new_alternate.release();
         }
         else {
             while (current->nextAlternate != nullptr) {
                 current = current->nextAlternate;
             }
 
-            current->nextAlternate = new_alternate;
+            current->nextAlternate = new_alternate.release();
         }
 
         return Success();
@@ -130,9 +130,9 @@ namespace Devices::USB::xHCI {
     }
 
     Success Device::FunctionDescriptor::AddInterface(const InterfaceDescriptor& interface) {
-        InterfaceDescriptor* const new_interface = reinterpret_cast<InterfaceDescriptor*>(Heap::Allocate(sizeof(InterfaceDescriptor)));
+        auto new_interface = kern::make_unique<InterfaceDescriptor>();
 
-        if (new_interface == nullptr) {
+        if (!new_interface) {
             return Failure();
         }
 
@@ -141,14 +141,14 @@ namespace Devices::USB::xHCI {
         InterfaceDescriptor* current = interfaces;
 
         if (current == nullptr) {
-            interfaces = new_interface;
+            interfaces = new_interface.release();
         }
         else {
             while (current->next != nullptr) {
                 current = current->next;
             }
 
-            current->next = new_interface;
+            current->next = new_interface.release();
         }
 
         ++interfacesNumber;
@@ -184,17 +184,19 @@ namespace Devices::USB::xHCI {
         }
     }
 
-    Optional<Device::FunctionDescriptor*> Device::ConfigurationDescriptor::AddFunction(const Device::FunctionDescriptor& function) {        
-        FunctionDescriptor* const new_function = reinterpret_cast<FunctionDescriptor*>(Heap::Allocate(sizeof(FunctionDescriptor)));
+    Optional<Device::FunctionDescriptor*> Device::ConfigurationDescriptor::AddFunction(const Device::FunctionDescriptor& function) {
+        auto new_function = kern::make_unique<FunctionDescriptor>();
 
-        if (new_function == nullptr) {
+        if (!new_function) {
             return Optional<FunctionDescriptor*>();
         }
 
         *new_function = function;
 
+        auto* ptr = new_function.release();
+
         if (functions == nullptr) {
-            functions = new_function;
+            functions = ptr;
         }
         else {
             FunctionDescriptor* current = functions;
@@ -203,10 +205,10 @@ namespace Devices::USB::xHCI {
                 current = current->next;
             }
 
-            current->next = new_function;
+            current->next = ptr;
         }
 
-        return Optional(new_function);
+        return Optional(ptr);
     }
 
     Device::FunctionDescriptor* Device::ConfigurationDescriptor::GetFunction(uint8_t fClass, uint8_t fSubClass, uint8_t fProtocol) const {
