@@ -95,7 +95,7 @@ namespace {
     }
 
     static inline void SetupHeap() {
-        if (!Heap::Create()) {
+        if (!Heap::Create().IsSuccess()) {
             Panic::PanicShutdown("KERNEL HEAP CREATION FAILED\n\r");
         }
     }
