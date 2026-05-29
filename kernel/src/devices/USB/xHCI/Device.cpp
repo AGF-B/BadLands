@@ -28,8 +28,9 @@
 #include <devices/USB/xHCI/Device.hpp>
 #include <devices/USB/xHCI/Specification.hpp>
 
+#include <kern/memory.hpp>
+
 #include <mm/Heap.hpp>
-#include <mm/IOHeap.hpp>
 #include <mm/Paging.hpp>
 #include <mm/Utils.hpp>
 
@@ -404,29 +405,28 @@ namespace Devices::USB::xHCI {
         return completion_code == TRB::CompletionCode::Success ? Success() : Failure();
     }
 
-    Optional<uint8_t*> Device::GetDescriptor(uint8_t type, uint8_t index, uint8_t languageID) {
+    kern::unique_io_ptr<uint8_t[]> Device::GetDescriptor(uint8_t type, uint8_t index, uint8_t languageID) {
         // alignas to prevent page boundary crossing issues
         static_assert(sizeof(RawDescriptorHeader) < 0x8);
         alignas(0x8) RawDescriptorHeader header;
         
         if (!GetDescriptor(type, index, sizeof(RawDescriptorHeader), reinterpret_cast<uint8_t*>(&header), languageID).IsSuccess()) {
-            return Optional<uint8_t*>();
+            return {};
         }
 
         const size_t descriptor_size = static_cast<size_t>(header.length);
 
-        uint8_t* descriptor_data = reinterpret_cast<uint8_t*>(IOHeap::Allocate(descriptor_size));
+        auto descriptor_data = kern::make_unique_io<uint8_t[]>(descriptor_size);
 
-        if (descriptor_data == nullptr) {
-            return Optional<uint8_t*>();
+        if (!descriptor_data) {
+            return {};
         }
 
-        if (!GetDescriptor(type, index, static_cast<uint16_t>(descriptor_size), descriptor_data, languageID).IsSuccess()) {
-            IOHeap::Free(descriptor_data);
-            return Optional<uint8_t*>();
+        if (!GetDescriptor(type, index, static_cast<uint16_t>(descriptor_size), descriptor_data.get(), languageID).IsSuccess()) {
+            return {};
         }
 
-        return Optional<uint8_t*>(descriptor_data);
+        return descriptor_data;
     }
 
     Success Device::GetDescriptor(uint8_t type, uint8_t index, uint16_t length, uint8_t* buffer, uint8_t languageID) {
@@ -445,33 +445,29 @@ namespace Devices::USB::xHCI {
         );
     }
 
-    Optional<char*> Device::GetString(uint8_t index, uint16_t languageID) {
+    kern::unique_ptr<char[]> Device::GetString(uint8_t index, uint16_t languageID) {
         if (languageID == 0) {
-            return Optional<char*>();
+            return {};
         }
 
-        auto descriptor_wrapper = GetDescriptor(StringDescriptor::DESCRIPTOR_TYPE, index, languageID);
+        kern::unique_io_ptr<uint8_t[]> descriptor_data = GetDescriptor(StringDescriptor::DESCRIPTOR_TYPE, index, languageID);
 
-        if (!descriptor_wrapper.HasValue()) {
-            return Optional<char*>();
+        if (!descriptor_data) {
+            return {};
         }
 
-        uint8_t* const descriptor_data = descriptor_wrapper.GetValue();
-
-        if (GetDescriptorSize(descriptor_data) < StringDescriptor::MIN_DESCRIPTOR_SIZE ||
-            GetDescriptorType(descriptor_data) != StringDescriptor::DESCRIPTOR_TYPE) {
-            IOHeap::Free(descriptor_data);
-            return Optional<char*>();
+        if (GetDescriptorSize(descriptor_data.get()) < StringDescriptor::MIN_DESCRIPTOR_SIZE ||
+            GetDescriptorType(descriptor_data.get()) != StringDescriptor::DESCRIPTOR_TYPE) {
+            return {};
         }
 
-        const size_t descriptor_size = GetDescriptorSize(descriptor_data);
+        const size_t descriptor_size = GetDescriptorSize(descriptor_data.get());
 
         const size_t string_length = (descriptor_size - 2) / sizeof(uint16_t);
-        char* const result_string = reinterpret_cast<char*>(Heap::Allocate(string_length + 1));
+        auto result_string = kern::make_unique<char[]>(string_length + 1);
 
-        if (result_string == nullptr) {
-            IOHeap::Free(descriptor_data);
-            return Optional<char*>();
+        if (!result_string) {
+            return {};
         }
 
         for (size_t i = 0; i < string_length; ++i) {
@@ -481,8 +477,7 @@ namespace Devices::USB::xHCI {
 
         result_string[string_length] = '\0';
 
-        IOHeap::Free(descriptor_data);
-        return Optional<char*>(result_string);
+        return result_string;
     }
 
     Success Device::SetConfiguration(Device& device, uint8_t configuration_value) {
@@ -756,22 +751,20 @@ namespace Devices::USB::xHCI {
     Optional<Device::ConfigurationDescriptor> Device::ParseConfigurationDescriptor(uint8_t index) {
         uint16_t pre_data[2] = { 0 };
 
-        auto pre_data_wrapper = GetDescriptor(ConfigurationDescriptor::DESCRIPTOR_TYPE, index, sizeof(pre_data), reinterpret_cast<uint8_t*>(pre_data));
+        auto pre_data_result = GetDescriptor(ConfigurationDescriptor::DESCRIPTOR_TYPE, index, sizeof(pre_data), reinterpret_cast<uint8_t*>(pre_data));
 
-        if (!pre_data_wrapper.IsSuccess()) {
+        if (!pre_data_result.IsSuccess()) {
             return Optional<ConfigurationDescriptor>();
         }
 
         const size_t descriptor_size = static_cast<size_t>(pre_data[1]);
 
-        uint8_t* const data = reinterpret_cast<uint8_t*>(IOHeap::Allocate(descriptor_size));
+        auto data = kern::make_unique_io<uint8_t[]>(descriptor_size);
 
-        if (data == nullptr) {
+        if (!data) {
             return Optional<ConfigurationDescriptor>();
         }
-
-        if (!GetDescriptor(ConfigurationDescriptor::DESCRIPTOR_TYPE, index, descriptor_size, data).IsSuccess()) {
-            IOHeap::Free(data);
+        else if (!GetDescriptor(ConfigurationDescriptor::DESCRIPTOR_TYPE, index, descriptor_size, data.get()).IsSuccess()) {
             return Optional<ConfigurationDescriptor>();
         }
         
@@ -798,10 +791,10 @@ namespace Devices::USB::xHCI {
             .functions = nullptr
         };
 
-        const uint8_t* ptr = data + GetDescriptorSize(data);
-        const uint8_t* const limit = data + *totalLength;
+        const uint8_t* ptr = data.get() + GetDescriptorSize(data.get());
+        const uint8_t* const limit = data.get() + *totalLength;
 
-        bool found_valid_interface = false;
+        bool found_valid_interface = false; 
 
         while (ptr < limit) {
             // check for interface associations
@@ -844,7 +837,6 @@ namespace Devices::USB::xHCI {
                 }
 
                 config_descriptor.Release();
-                IOHeap::Free(data);
                 return Optional<ConfigurationDescriptor>();
             }
 
@@ -886,7 +878,6 @@ namespace Devices::USB::xHCI {
                                 }
 
                                 config_descriptor.Release();
-                                IOHeap::Free(data);
                                 return Optional<ConfigurationDescriptor>();
                             }
 
@@ -951,8 +942,6 @@ namespace Devices::USB::xHCI {
                 }
             }
         }
-
-        IOHeap::Free(data);
 
         if (!found_valid_interface) {
             config_descriptor.Release();
@@ -1516,11 +1505,10 @@ namespace Devices::USB::xHCI {
             Log::printfSafe("[USB] Enumerating configuration topology...\n\r");
 
             if (descriptor.manufacturerDescriptorIndex != 0) {
-                auto manufacturer_string_wrapper = GetString(descriptor.manufacturerDescriptorIndex, 0x0409);
+                kern::unique_ptr<char[]> manufacturer_string = GetString(descriptor.manufacturerDescriptorIndex, 0x0409);
 
-                if (manufacturer_string_wrapper.HasValue()) {
-                    Log::printfSafe("[USB] Manufacturer String: %s\r\n", manufacturer_string_wrapper.GetValue());
-                    Heap::Free(manufacturer_string_wrapper.GetValue());
+                if (manufacturer_string) {
+                    Log::printfSafe("[USB] Manufacturer String: %s\r\n", manufacturer_string.get());
                 }
                 else {
                     Log::printfSafe("[USB] Failed to get manufacturer string\r\n");
@@ -1528,11 +1516,10 @@ namespace Devices::USB::xHCI {
             }
 
             if (descriptor.productDescriptorIndex != 0) {
-                auto product_string_wrapper = GetString(descriptor.productDescriptorIndex, 0x0409);
+                kern::unique_ptr<char[]> product_string = GetString(descriptor.productDescriptorIndex, 0x0409);
 
-                if (product_string_wrapper.HasValue()) {
-                    Log::printfSafe("[USB] Product String: %s\r\n", product_string_wrapper.GetValue());
-                    Heap::Free(product_string_wrapper.GetValue());
+                if (product_string) {
+                    Log::printfSafe("[USB] Product String: %s\r\n", product_string.get());
                 }
                 else {
                     Log::printfSafe("[USB] Failed to get product string\r\n");
@@ -1540,11 +1527,10 @@ namespace Devices::USB::xHCI {
             }
 
             if (descriptor.serialNumberDescriptorIndex != 0) {
-                auto serial_string_wrapper = GetString(descriptor.serialNumberDescriptorIndex, 0x0409);
+                kern::unique_ptr<char[]> serial_string = GetString(descriptor.serialNumberDescriptorIndex, 0x0409);
 
-                if (serial_string_wrapper.HasValue()) {
-                    Log::printfSafe("[USB] Serial Number String: %s\r\n", serial_string_wrapper.GetValue());
-                    Heap::Free(serial_string_wrapper.GetValue());
+                if (serial_string) {
+                    Log::printfSafe("[USB] Serial Number String: %s\r\n", serial_string.get());
                 }
                 else {  
                     Log::printfSafe("[USB] Failed to get serial number string\r\n");

@@ -22,6 +22,8 @@
 
 #include <devices/USB/xHCI/Specification.hpp>
 
+#include <kern/memory.hpp>
+
 namespace Devices {
     namespace USB {
         class Driver;
@@ -246,9 +248,9 @@ namespace Devices {
                     TRB::CompletionCode* status_code
                 );
 
-                Optional<uint8_t*> GetDescriptor(uint8_t type, uint8_t index, uint8_t languageID = 0);
+                kern::unique_io_ptr<uint8_t[]> GetDescriptor(uint8_t type, uint8_t index, uint8_t languageID = 0);
                 Success GetDescriptor(uint8_t type, uint8_t index, uint16_t length, uint8_t* buffer, uint8_t languageID = 0);
-                Optional<char*> GetString(uint8_t index, uint16_t languageID = 0);
+                kern::unique_ptr<char[]> GetString(uint8_t index, uint16_t languageID = 0);
 
                 static Success SetConfiguration(Device& device, uint8_t configuration_value);
                 static Success ConfigureEndpoint(Device& device, const EndpointDescriptor& endpoint);
