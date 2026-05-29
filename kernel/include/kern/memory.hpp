@@ -19,9 +19,11 @@
 #include <utility>
 
 #include <mm/Heap.hpp>
+#include <mm/IOHeap.hpp>
+#include <mm/MemoryProvider.hpp>
 
 namespace kern {
-    template<class T>
+    template<class T, MemoryProvider Provider = Heap>
     class unique_ptr {
     private:
         T* ptr;
@@ -31,11 +33,13 @@ namespace kern {
         constexpr void Release() {
             if (ptr != nullptr) {
                 ptr->~T();
-                Heap::Free(ptr);
+                Provider::Free(ptr);
             }
         }
 
     public:
+        using _Provider = Provider;
+
         inline constexpr unique_ptr() : ptr {nullptr} {}
         inline constexpr unique_ptr(T* ptr) : ptr {ptr} {}
         inline constexpr unique_ptr(const unique_ptr&) = delete;
@@ -70,8 +74,8 @@ namespace kern {
         inline constexpr operator bool() const { return ptr != nullptr; }
     };
 
-    template<class T>
-    class unique_ptr<T[]> {
+    template<class T, MemoryProvider Provider>
+    class unique_ptr<T[], Provider> {
     private:
         T* ptr;
         size_t length;
@@ -82,11 +86,13 @@ namespace kern {
                     ptr[i].~T();
                 }
 
-                Heap::Free(ptr);
+                Provider::Free(ptr);
             }
         }
 
     public:
+        using _Provider = Provider;
+
         inline constexpr unique_ptr() : ptr{nullptr}, length{0} {}
         inline constexpr unique_ptr(T* ptr, size_t length) : ptr {ptr}, length{length} {}
         inline constexpr unique_ptr(const unique_ptr&) = delete;
@@ -136,30 +142,45 @@ namespace kern {
     };
 
     template<class T>
-    constexpr unique_ptr<T> make_unique(size_t i) requires std::is_array_v<T> {
+    using unique_io_ptr = unique_ptr<T, IOHeap>;
+
+    template<class T, MemoryProvider Provider = Heap>
+    constexpr unique_ptr<T, Provider> make_unique(size_t i) requires std::is_array_v<T> {
         using X = typename std::remove_extent<T>::type;
         
-        auto* ptr = static_cast<X*>(Heap::Allocate(sizeof(X) * i));
+        auto* ptr = static_cast<X*>(Provider::Allocate(sizeof(X) * i));
 
         if (ptr == nullptr) {
-            return unique_ptr<T>();
+            return unique_ptr<T, Provider>();
         }
 
-        new (ptr) T();
+        for (size_t j = 0; j < i; ++j) {
+            new (ptr + j) X();
+        }
 
-        return unique_ptr<T>(ptr, i);
+        return unique_ptr<T, Provider>(ptr, i);
     }
 
-    template<class T, class... Args>
-    constexpr unique_ptr<T> make_unique(Args&&... args) {
-        auto* ptr = static_cast<T*>(Heap::Allocate(sizeof(T)));
+    template<class T>
+    constexpr unique_io_ptr<T> make_unique_io(size_t i) requires std::is_array_v<T> {
+        return make_unique<T, IOHeap>(i);
+    }
+
+    template<class T, MemoryProvider Provider = Heap, class... Args>
+    constexpr unique_ptr<T, Provider> make_unique(Args&&... args) {
+        auto* ptr = static_cast<T*>(Provider::Allocate(sizeof(T)));
 
         if (ptr == nullptr) {
-            return unique_ptr<T>();
+            return unique_ptr<T, Provider>();
         }
 
         new (ptr) T(std::forward<Args>(args)...);
 
-        return unique_ptr<T>(ptr);
+        return unique_ptr<T, Provider>(ptr);
+    }
+
+    template<class T, class... Args>
+    constexpr unique_io_ptr<T> make_unique_io(Args&&... args) {
+        return make_unique<T, IOHeap>(std::forward<Args>(args)...);
     }
 }
