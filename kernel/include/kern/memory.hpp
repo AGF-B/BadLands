@@ -14,9 +14,13 @@
 
 #pragma once
 
+#include <cstdint>
+
 #include <new>
 #include <type_traits>
 #include <utility>
+
+#include <shared/SimpleAtomic.hpp>
 
 #include <mm/Heap.hpp>
 #include <mm/IOHeap.hpp>
@@ -30,7 +34,7 @@ namespace kern {
 
         using X = typename std::remove_extent<T>::type;
 
-        constexpr void Release() {
+        constexpr void ReleaseMemory() {
             if (ptr != nullptr) {
                 ptr->~T();
                 Provider::Free(ptr);
@@ -47,7 +51,7 @@ namespace kern {
             other.ptr = nullptr;
         }
         
-        inline constexpr ~unique_ptr() { Release(); }
+        inline constexpr ~unique_ptr() { ReleaseMemory(); }
 
         inline constexpr T* release() {
             T* tmp = ptr;
@@ -61,7 +65,7 @@ namespace kern {
         inline constexpr unique_ptr& operator=(const unique_ptr&) = delete;
         inline constexpr unique_ptr& operator=(unique_ptr&& other) {
             if (this != &other) {
-                Release();
+                ReleaseMemory();
                 ptr = other.ptr;
                 other.ptr = nullptr;
             }
@@ -80,7 +84,7 @@ namespace kern {
         T* ptr;
         size_t length;
 
-        constexpr void Release() {
+        constexpr void ReleaseMemory() {
             if (ptr != nullptr) {
                 for (size_t i = 0; i < length; ++i) {
                     ptr[i].~T();
@@ -101,7 +105,7 @@ namespace kern {
             other.length = 0;
         }
         
-        inline constexpr ~unique_ptr() { Release(); }
+        inline constexpr ~unique_ptr() { ReleaseMemory(); }
 
         inline constexpr T* release() {
             T* tmp = ptr;
@@ -116,7 +120,7 @@ namespace kern {
         inline constexpr unique_ptr& operator=(const unique_ptr&) = delete;
         inline constexpr unique_ptr& operator=(unique_ptr&& other) {
             if (this != &other) {
-                Release();
+                ReleaseMemory();
 
                 ptr = other.ptr;
                 length = other.length;
@@ -145,7 +149,7 @@ namespace kern {
     using unique_io_ptr = unique_ptr<T, IOHeap>;
 
     template<class T, MemoryProvider Provider = Heap>
-    constexpr unique_ptr<T, Provider> make_unique(size_t i) requires std::is_array_v<T> {
+    inline constexpr unique_ptr<T, Provider> make_unique(size_t i) requires std::is_array_v<T> {
         using X = typename std::remove_extent<T>::type;
         
         auto* ptr = static_cast<X*>(Provider::Allocate(sizeof(X) * i));
@@ -162,12 +166,12 @@ namespace kern {
     }
 
     template<class T>
-    constexpr unique_io_ptr<T> make_unique_io(size_t i) requires std::is_array_v<T> {
+    inline constexpr unique_io_ptr<T> make_unique_io(size_t i) requires std::is_array_v<T> {
         return make_unique<T, IOHeap>(i);
     }
 
     template<class T, MemoryProvider Provider = Heap, class... Args>
-    constexpr unique_ptr<T, Provider> make_unique(Args&&... args) {
+    inline constexpr unique_ptr<T, Provider> make_unique(Args&&... args) {
         auto* ptr = static_cast<T*>(Provider::Allocate(sizeof(T)));
 
         if (ptr == nullptr) {
@@ -180,7 +184,111 @@ namespace kern {
     }
 
     template<class T, class... Args>
-    constexpr unique_io_ptr<T> make_unique_io(Args&&... args) {
+    inline constexpr unique_io_ptr<T> make_unique_io(Args&&... args) {
         return make_unique<T, IOHeap>(std::forward<Args>(args)...);
+    }
+
+    template<class T, MemoryProvider Provider = Heap>
+    class shared_ptr {
+    public:
+        class CountedInlinePtr {
+        public:
+            Utils::SimpleAtomic<size_t> references;
+            alignas(T) uint8_t container[sizeof(T)];
+
+            inline constexpr void Destroy() {
+                reinterpret_cast<T*>(container)->~T();
+                this->~CountedInlinePtr();
+                Provider::Free(this);
+            }
+        };
+
+    private:
+        CountedInlinePtr* control;
+        T* ptr;
+
+        inline constexpr void ReleaseMemory() {
+            if (control != nullptr) {
+                if (--control->references == 0) {
+                    auto tmp_control = control;
+                    control = nullptr;
+                    ptr = nullptr;
+                    tmp_control->Destroy();
+                }
+            }
+        }
+
+        inline constexpr shared_ptr(CountedInlinePtr* control, T* ptr) : control{control}, ptr{ptr} {}
+
+        template<class U, MemoryProvider P, class... Args>
+        friend constexpr shared_ptr<U, P> make_shared(Args&&... args);
+
+    public:
+        inline constexpr shared_ptr() : control{nullptr}, ptr{nullptr} {}
+        inline constexpr shared_ptr(const shared_ptr& other) : control{other.control}, ptr{other.ptr} {
+            if (control != nullptr) {
+                ++control->references;
+            }
+        }
+        inline constexpr shared_ptr(shared_ptr&& other) : control{other.control}, ptr{other.ptr} {
+            other.control = nullptr;
+            other.ptr = nullptr;
+        }
+
+        inline constexpr ~shared_ptr() { ReleaseMemory(); }
+
+        inline constexpr T* get() { return ptr; }
+        inline constexpr const T* get() const { return ptr; }
+
+        inline constexpr shared_ptr& operator=(const shared_ptr& other) {
+            if (this != &other) {
+                ReleaseMemory();
+
+                control = other.control;
+                ptr = other.ptr;
+
+                if (control != nullptr) {
+                    ++control->references;
+                }
+            }
+
+            return *this;
+        }
+        inline constexpr shared_ptr& operator=(shared_ptr&& other) {
+            if (this != &other) {
+                ReleaseMemory();
+
+                control = other.control;
+                ptr = other.ptr;
+
+                other.control = nullptr;
+                other.ptr = nullptr;
+            }
+
+            return *this;
+        }
+
+        inline constexpr T* operator->() const { return ptr; }
+        inline constexpr T& operator*() const { return *ptr; }
+        inline constexpr operator bool() const { return ptr != nullptr; }
+    };
+
+    template<class T, MemoryProvider Provider = Heap, class... Args>
+    inline constexpr shared_ptr<T, Provider> make_shared(Args&&... args) {
+        using control_t = shared_ptr<T, Provider>::CountedInlinePtr;
+
+        auto* control = static_cast<control_t*>(
+            Provider::Allocate(sizeof(control_t))
+        );
+
+        if (control == nullptr) {
+            return shared_ptr<T, Provider>();
+        }
+
+        new (control) control_t();
+        new (control->container) T(std::forward<Args>(args)...);
+        control->references.store(1);
+
+        return shared_ptr<T, Provider>(control, reinterpret_cast<T*>(control->container));
     }
 }
