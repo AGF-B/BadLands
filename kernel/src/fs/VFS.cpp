@@ -157,10 +157,10 @@ FS::Response<kern::shared_ptr<FS::IFNode>> VFS::OpenParent(const FS::DirectoryEn
     }
 
     if (current.NameLength == 0) {
-        return FS::Response(node);
+        return {node};
     }
     
-    return FS::Response(node->Find(current));
+    return {node->Find(current)};
 }
 
 FS::Response<kern::shared_ptr<FS::IFNode>> VFS::Open(const FS::DirectoryEntry& filepath) {

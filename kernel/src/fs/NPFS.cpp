@@ -51,7 +51,7 @@ namespace {
             }
 
             virtual FS::Response<uint8_t*> GetBlock([[maybe_unused]] size_t blockId) {
-                return FS::Response<uint8_t*>(nullptr);
+                return {nullptr};
             }
 
             virtual void Destroy() { }
@@ -120,7 +120,7 @@ namespace {
             FS::Response<uint8_t*> GetBlock(size_t blockId) final {
                 if (depth == 1) {
                     if (blockId >= JUNCTION_SIZE) {
-                        return FS::Response<uint8_t*>(FS::Status::OUT_OF_BOUNDS);
+                        return {FS::Status::OUT_OF_BOUNDS};
                     }
 
                     TerminalDataVector* tdv = (TerminalDataVector*)junction[blockId];
@@ -129,14 +129,14 @@ namespace {
                         void* mem = Heap::Allocate(sizeof(TerminalDataVector));
                         
                         if (mem == nullptr) {
-                            return FS::Response<uint8_t*>(FS::Status::DEVICE_ERROR);
+                            return {FS::Status::DEVICE_ERROR};
                         }
 
                         tdv = new(mem) TerminalDataVector();
                         junction[blockId] = tdv;
                     }
 
-                    return FS::Response(tdv->GetBlock());
+                    return {tdv->GetBlock()};
                 }
 
                 size_t reductor = 1;
@@ -149,7 +149,7 @@ namespace {
                 size_t subId = blockId % reductor;
 
                 if (junctionId >= JUNCTION_SIZE) {
-                    return FS::Response<uint8_t*>(FS::Status::OUT_OF_BOUNDS);
+                    return {FS::Status::OUT_OF_BOUNDS};
                 }
 
                 DataStorageVector* subVector = junction[junctionId];
@@ -158,7 +158,7 @@ namespace {
                     void* mem = Heap::Allocate(sizeof(DataJunction));
 
                     if (mem == nullptr) {
-                        return FS::Response<uint8_t*>(FS::Status::DEVICE_ERROR);
+                        return {FS::Status::DEVICE_ERROR};
                     }
 
                     subVector = new(mem) DataJunction(depth - 1);
@@ -487,7 +487,7 @@ FS::Response<size_t> NPFS::Directory::List(FS::DirectoryEntry* list, size_t leng
     const size_t entrySize = sizeof(DirectoryEntry);
 
     if (blockSize % entrySize != 0) {
-        return FS::Response<size_t>(FS::Status::DEVICE_ERROR);
+        return {FS::Status::DEVICE_ERROR};
     }
 
     const size_t entriesPerBlock = blockSize / entrySize;
@@ -519,7 +519,7 @@ FS::Response<size_t> NPFS::Directory::List(FS::DirectoryEntry* list, size_t leng
         entryId = 0;
     }
 
-    return FS::Response(length - remaining);
+    return {length - remaining};
 }
 
 FS::Status NPFS::Directory::Query([[maybe_unused]] const FS::QueryInfo& info) {

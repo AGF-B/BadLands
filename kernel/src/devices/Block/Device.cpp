@@ -380,19 +380,19 @@ namespace Devices::Block {
         const uint64_t blocksToRead = endBlock - startBlock;
 
         if (blocksToRead == 0) {
-            return FS::Response<size_t>(0);
+            return {0};
         }
         else if (offset % blockSize != 0 || count % blockSize != 0) {
-            return FS::Response<size_t>(FS::Status::INVALID_PARAMETER);
+            return {FS::Status::INVALID_PARAMETER};
         }
         else if (endBlock > blocksCount) {
-            return FS::Response<size_t>(FS::Status::OUT_OF_BOUNDS);
+            return {FS::Status::OUT_OF_BOUNDS};
         }
         else if (!interface->ReadBlocks(firstBlock + startBlock, blocksToRead, buffer).IsSuccess()) {
-            return FS::Response<size_t>(FS::Status::DEVICE_ERROR);
+            return {FS::Status::DEVICE_ERROR};
         }
 
-        return FS::Response<size_t>(blocksToRead * blockSize);
+        return {blocksToRead * blockSize};
     }
 
     FS::Response<size_t> Partition::Write(size_t offset, size_t count, const uint8_t* buffer) {
@@ -402,19 +402,19 @@ namespace Devices::Block {
         const uint64_t blocksToWrite    = endBlock - startBlock;
 
         if (blocksToWrite == 0) {
-            return FS::Response<size_t>(0);
+            return {0};
         }
         else if (offset % blockSize != 0 || count % blockSize != 0) {
-            return FS::Response<size_t>(FS::Status::INVALID_PARAMETER);
+            return {FS::Status::INVALID_PARAMETER};
         }
         else if (endBlock > blocksCount) {
-            return FS::Response<size_t>(FS::Status::OUT_OF_BOUNDS);
+            return {FS::Status::OUT_OF_BOUNDS};
         }
         else if (!interface->WriteBlocks(firstBlock + startBlock, blocksToWrite, buffer).IsSuccess()) {
-            return FS::Response<size_t>(FS::Status::DEVICE_ERROR);
+            return {FS::Status::DEVICE_ERROR};
         }
 
-        return FS::Response<size_t>(blocksToWrite * blockSize);
+        return {blocksToWrite * blockSize};
     }
 
     FS::Status Partition::Query(const FS::QueryInfo& info) {
@@ -672,19 +672,19 @@ namespace Devices::Block {
         const uint64_t blocksCount = endBlock - startBlock;
 
         if (blocksCount == 0) {
-            return FS::Response<size_t>(0);
+            return {0};
         }
         else if (offset % blockSize != 0 || count % blockSize != 0) {
-            return FS::Response<size_t>(FS::Status::INVALID_PARAMETER);
+            return {FS::Status::INVALID_PARAMETER};
         }
         else if (endBlock > interface->GetBlocksCount()) {
-            return FS::Response<size_t>(FS::Status::OUT_OF_BOUNDS);
+            return {FS::Status::OUT_OF_BOUNDS};
         }
         else if (!interface->ReadBlocks(startBlock, blocksCount, buffer).IsSuccess()) {
-            return FS::Response<size_t>(FS::Status::DEVICE_ERROR);
+            return {FS::Status::DEVICE_ERROR};
         }
 
-        return FS::Response<size_t>(blocksCount * blockSize);
+        return {blocksCount * blockSize};
     }
 
     FS::Response<size_t> Device::Write(size_t offset, size_t count, const uint8_t* buffer) {
@@ -694,19 +694,19 @@ namespace Devices::Block {
         const uint64_t blocksCount = endBlock - startBlock;
 
         if (blocksCount == 0) {
-            return FS::Response<size_t>(0);
+            return {0};
         }
         else if (offset % blockSize != 0 || count % blockSize != 0) {
-            return FS::Response<size_t>(FS::Status::INVALID_PARAMETER);
+            return {FS::Status::INVALID_PARAMETER};
         }
         else if (endBlock > interface->GetBlocksCount()) {
-            return FS::Response<size_t>(FS::Status::OUT_OF_BOUNDS);
+            return {FS::Status::OUT_OF_BOUNDS};
         }
         else if (!interface->WriteBlocks(startBlock, blocksCount, buffer).IsSuccess()) {
-            return FS::Response<size_t>(FS::Status::DEVICE_ERROR);
+            return {FS::Status::DEVICE_ERROR};
         }
 
-        return FS::Response<size_t>(blocksCount * blockSize);
+        return {blocksCount * blockSize};
     }
 
     FS::Status Device::Query(const FS::QueryInfo& info) {

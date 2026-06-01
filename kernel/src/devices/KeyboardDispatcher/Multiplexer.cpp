@@ -63,11 +63,11 @@ namespace {
 			const size_t available_packets = available_packets_count;
 
 			if (available_packets == 0) {
-				return FS::Response<size_t>(0);
+				return {0};
 			}
 
 			if (count % PACKET_SIZE != 0) {
-				return FS::Response<size_t>(FS::Status::INVALID_PARAMETER);
+				return {FS::Status::INVALID_PARAMETER};
 			}
 
 			const size_t packets = count / PACKET_SIZE;
@@ -79,21 +79,21 @@ namespace {
 
 			available_packets_count -= read_packets;
 
-			return FS::Response(read_packets * PACKET_SIZE);
+			return {read_packets * PACKET_SIZE};
 		}
 
 		virtual FS::Response<size_t> Write([[maybe_unused]] size_t offset, size_t count, const uint8_t* buffer) final {
 			Utils::LockGuard _{write_lock};
 
 			if (count % PACKET_SIZE != 0) {
-				return FS::Response<size_t>(FS::Status::INVALID_PARAMETER);
+				return {FS::Status::INVALID_PARAMETER};
 			}
 
 			const size_t available_packets = available_packets_count;
 			const size_t remaining_space = CAPACITY - available_packets;
 
 			if (remaining_space == 0) {
-				return FS::Response<size_t>(0);
+				return {0};
 			}
 
 			const size_t packets = count / PACKET_SIZE;
@@ -104,7 +104,7 @@ namespace {
 				Utils::memcpy(this->buffer + ((location + available_packets + i) % CAPACITY) * PACKET_SIZE, buffer, PACKET_SIZE);
 			}
 
-			return FS::Response(written_packets * PACKET_SIZE);
+			return {written_packets * PACKET_SIZE};
 		}
 
 		virtual FS::Status Query([[maybe_unused]] const FS::QueryInfo& info) final {
