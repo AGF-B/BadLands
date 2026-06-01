@@ -23,6 +23,10 @@
 #include <devices/Storage/Controller.hpp>
 #include <devices/Storage/Driver.hpp>
 
+#include <kern/memory.hpp>
+
+#include <mm/MemoryProvider.hpp>
+
 namespace Devices {
     namespace Storage {
         namespace SCSI {
@@ -33,7 +37,7 @@ namespace Devices {
                     uint64_t blockSize;
                 };
 
-                Storage::Controller& controller;
+                kern::shared_ptr<Storage::Controller> controller;
                 const uint8_t lun;
 
                 CapacityInformation capacity = {
@@ -43,23 +47,27 @@ namespace Devices {
 
                 bool use_extended_methods = false;
 
-                Block::Device* device{nullptr};
-
-                inline constexpr Driver(Storage::Controller& controller, uint8_t lun) : controller{controller}, lun{lun} { }
+                kern::shared_ptr<Block::Device> device{};
 
                 Optional<CapacityInformation> ReadCapacity10();
                 Optional<CapacityInformation> ReadCapacity16();
                 Optional<CapacityInformation> ReadCapacity();
 
+                inline constexpr Driver(const kern::shared_ptr<Storage::Controller>& controller, uint8_t lun)
+                    : controller{controller}, lun{lun} { }
+
                 Success SendReadCommand(uint64_t startBlock, uint64_t blocksCount, uint8_t* buffer);
                 Success SendWriteCommand(uint64_t startBlock, uint64_t blocksCount, const uint8_t* buffer);
 
+                template<class T, MemoryProvider Provider, class... Args>
+                friend constexpr kern::shared_ptr<T, Provider> kern::make_shared(Args&&... args);
+
             public:
-                static Optional<Driver*> Create(Storage::Controller& controller, uint8_t lun);
+                static kern::shared_ptr<Driver> Create(const kern::shared_ptr<Storage::Controller>& controller, uint8_t lun);
 
-                virtual void Destroy() final;
+                virtual void Eject() final;
 
-                virtual Success PostInitialization() final;
+                virtual Success PostInitialization(const kern::shared_ptr<Storage::Driver>& self) final;
 
                 inline constexpr uint8_t GetLUN() const {
                     return lun;

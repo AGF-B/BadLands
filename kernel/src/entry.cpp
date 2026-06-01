@@ -147,16 +147,16 @@ namespace {
 
 Kernel::KernelExports Kernel::Exports = {
     .vfs = nullptr,
-    .deviceInterface = nullptr,
-    .keyboardMultiplexerInterface = nullptr
+    .deviceInterface = {},
+    .keyboardMultiplexerInterface = {}
 };
 
 void BootProcessorInit() {
-    auto* const keyboardMultiplexer = Devices::KeyboardDispatcher::Initialize(Kernel::Exports.deviceInterface);
+    const auto keyboardMultiplexer = Devices::KeyboardDispatcher::Initialize(Kernel::Exports.deviceInterface);
 
     Kernel::Exports.keyboardMultiplexerInterface = keyboardMultiplexer;
 
-    SetupPS2Keyboard(keyboardMultiplexer);
+    SetupPS2Keyboard(keyboardMultiplexer.get());
 
     PCI::Enumerate();
 
@@ -214,7 +214,6 @@ LEGACY_EXPORT void KernelEntry() {
     }
 
     response = root->Find(DeviceEntry);
-    root->Close();
 
     if (response.CheckError()) {
         Panic::PanicShutdown("[ENTRY] Could not open VFS device interface\n\r");

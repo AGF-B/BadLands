@@ -60,7 +60,7 @@ namespace kern {
         }
 
         inline constexpr T* get() { return ptr; }
-        inline constexpr const T* get() const { return ptr; }
+        inline constexpr T* get() const { return ptr; }
 
         inline constexpr unique_ptr& operator=(const unique_ptr&) = delete;
         inline constexpr unique_ptr& operator=(unique_ptr&& other) {
@@ -115,7 +115,7 @@ namespace kern {
         }
 
         inline constexpr T* get() { return ptr; }
-        inline constexpr const T* get() const { return ptr; }
+        inline constexpr T* get() const { return ptr; }
 
         inline constexpr unique_ptr& operator=(const unique_ptr&) = delete;
         inline constexpr unique_ptr& operator=(unique_ptr&& other) {
@@ -171,7 +171,7 @@ namespace kern {
     }
 
     template<class T, MemoryProvider Provider = Heap, class... Args>
-    inline constexpr unique_ptr<T, Provider> make_unique(Args&&... args) {
+    inline constexpr unique_ptr<T, Provider> make_unique(Args&&... args) requires (!std::is_array_v<T>) {
         auto* ptr = static_cast<T*>(Provider::Allocate(sizeof(T)));
 
         if (ptr == nullptr) {
@@ -188,23 +188,34 @@ namespace kern {
         return make_unique<T, IOHeap>(std::forward<Args>(args)...);
     }
 
+    class BasicCountedObject {
+    public:
+        Utils::SimpleAtomic<size_t> references;
+        void (*deleter)(BasicCountedObject*);
+    };
+
     template<class T, MemoryProvider Provider = Heap>
     class shared_ptr {
     public:
-        class CountedInlinePtr {
+        class CountedInlinePtr : public BasicCountedObject {
         public:
-            Utils::SimpleAtomic<size_t> references;
             alignas(T) uint8_t container[sizeof(T)];
 
-            inline constexpr void Destroy() {
-                reinterpret_cast<T*>(container)->~T();
-                this->~CountedInlinePtr();
-                Provider::Free(this);
+            static void Destroyer(BasicCountedObject* obj) {
+                auto* self = static_cast<CountedInlinePtr*>(obj);
+                reinterpret_cast<T*>(self->container)->~T();
+                self->~CountedInlinePtr();
+                Provider::Free(self);
+            }
+
+            inline constexpr CountedInlinePtr() {
+                this->references.store(0);
+                this->deleter = &Destroyer;
             }
         };
 
     private:
-        CountedInlinePtr* control;
+        BasicCountedObject* control;
         T* ptr;
 
         inline constexpr void ReleaseMemory() {
@@ -213,15 +224,18 @@ namespace kern {
                     auto tmp_control = control;
                     control = nullptr;
                     ptr = nullptr;
-                    tmp_control->Destroy();
+                    tmp_control->deleter(tmp_control);
                 }
             }
         }
 
-        inline constexpr shared_ptr(CountedInlinePtr* control, T* ptr) : control{control}, ptr{ptr} {}
+        inline constexpr shared_ptr(BasicCountedObject* control, T* ptr) : control{control}, ptr{ptr} {}
 
         template<class U, MemoryProvider P, class... Args>
         friend constexpr shared_ptr<U, P> make_shared(Args&&... args);
+
+        template<class V, class U, MemoryProvider P>
+        friend constexpr shared_ptr<V, P> static_pointer_cast(const shared_ptr<U, P>& other);
 
     public:
         inline constexpr shared_ptr() : control{nullptr}, ptr{nullptr} {}
@@ -238,7 +252,7 @@ namespace kern {
         inline constexpr ~shared_ptr() { ReleaseMemory(); }
 
         inline constexpr T* get() { return ptr; }
-        inline constexpr const T* get() const { return ptr; }
+        inline constexpr T* get() const { return ptr; }
 
         inline constexpr shared_ptr& operator=(const shared_ptr& other) {
             if (this != &other) {
@@ -290,5 +304,13 @@ namespace kern {
         control->references.store(1);
 
         return shared_ptr<T, Provider>(control, reinterpret_cast<T*>(control->container));
+    }
+
+    template<class V, class U, MemoryProvider P>
+    inline constexpr shared_ptr<V, P> static_pointer_cast(const shared_ptr<U, P>& other) {
+        if (other.control != nullptr) {
+            ++other.control->references;
+        }
+        return shared_ptr<V, P>(other.control, static_cast<V*>(other.ptr));
     }
 }

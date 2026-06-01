@@ -25,6 +25,8 @@
 #include <devices/USB/MassStorage/BBB/Driver.hpp>
 #include <devices/USB/xHCI/Device.hpp>
 
+#include <kern/memory.hpp>
+
 #include <mm/Heap.hpp>
 #include <mm/Paging.hpp>
 #include <mm/PhysicalMemory.hpp>
@@ -37,13 +39,13 @@
 
 namespace Devices::USB::MassStorage::BBB {
     Driver::Driver(
-        xHCI::Device& device,
-        const Driver::StorageInfo& storage_info,
+        const kern::shared_ptr<xHCI::Device>& device,
+        Driver::StorageInfo&& storage_info,
         const Driver::EndpointsInfo& endpoints_info,
         const Driver::IOBufferInfo& io_buffer_info
     ) :
         MassStorage::Driver{device},
-        storage_info{storage_info},
+        storage_info{std::move(storage_info)},
         endpoints_info{endpoints_info},
         io_buffer{io_buffer_info.pointer},
         phys_io_buffer{io_buffer_info.physical_pointer}
@@ -90,22 +92,26 @@ namespace Devices::USB::MassStorage::BBB {
         return Success(result);
     }
 
-    Optional<USB::Driver*> Driver::Create(xHCI::Device& device, uint8_t configurationValue, const xHCI::Device::FunctionDescriptor* function) {
+    kern::shared_ptr<USB::Driver> Driver::Create(
+        const kern::shared_ptr<xHCI::Device>& device,
+        uint8_t configurationValue,
+        const xHCI::Device::FunctionDescriptor* function
+    ) {
         Log::printfSafe("[BBB] Attempting to initialize bulk-only transport mass storage controller (configuration value: %d)\n\r", configurationValue);
         
-        if (!SendRequest(device, 0x21, 0xFF, 0, function->interfaces->interfaceNumber, 0, nullptr, nullptr).IsSuccess()) {
+        if (!SendRequest(*device, 0x21, 0xFF, 0, function->interfaces->interfaceNumber, 0, nullptr, nullptr).IsSuccess()) {
             if constexpr (Debug::DEBUG_BBB_ERRORS) {
                 Log::printfSafe("[BBB] Failed to perform bulk-only reset on mass storage controller\r\n");
             }
 
-            return Optional<USB::Driver*>();
+            return {};
         }
 
         uint8_t max_lun = 0;
 
         xHCI::TRB::CompletionCode completion_code = xHCI::TRB::CompletionCode::Invalid;
 
-        if (!SendRequest(device, 0xA1, 0xFE, 0, function->interfaces->interfaceNumber, 1, &max_lun, &completion_code).IsSuccess()) {
+        if (!SendRequest(*device, 0xA1, 0xFE, 0, function->interfaces->interfaceNumber, 1, &max_lun, &completion_code).IsSuccess()) {
             if (completion_code == xHCI::TRB::CompletionCode::StallError) {
                 max_lun = 0;
             }
@@ -114,16 +120,16 @@ namespace Devices::USB::MassStorage::BBB {
                     Log::printfSafe("[BBB] Failed to get max LUN from mass storage controller\r\n");
                 }
 
-                return Optional<USB::Driver*>();
+                return {};
             }
         } 
 
-        if (!SetConfiguration(device, configurationValue).IsSuccess()) {
+        if (!SetConfiguration(*device, configurationValue).IsSuccess()) {
             if constexpr (Debug::DEBUG_BBB_ERRORS) {
                 Log::printfSafe("[BBB] Could not configure endpoint 0x%0.2hhx\n\r", configurationValue);
             }
 
-            return Optional<USB::Driver*>();
+            return {};
         }
 
         auto* config_interface = function->interfaces;
@@ -135,12 +141,12 @@ namespace Devices::USB::MassStorage::BBB {
             for (size_t i = 0; i < config_interface->endpointsNumber; ++i) {
                 const auto& endpoint = config_interface->endpoints[i];
                 
-                if (!ConfigureEndpoint(device, endpoint).IsSuccess()) {
+                if (!ConfigureEndpoint(*device, endpoint).IsSuccess()) {
                     if constexpr (Debug::DEBUG_BBB_ERRORS) {
                         Log::printfSafe("[BBB] Could not configure endpoint 0x%0.2hhx\n\r", endpoint.endpointAddress);
                     }
 
-                    return Optional<USB::Driver*>();
+                    return {};
                 }
 
                 if constexpr (Debug::DEBUG_BBB_INFO) {
@@ -163,7 +169,7 @@ namespace Devices::USB::MassStorage::BBB {
                 Log::putsSafe("[BBB] Could not find required bulk IN and OUT endpoints\n\r");
             }
 
-            return Optional<USB::Driver*>();
+            return {};
         }
 
         void* phys_io_buffer = PhysicalMemory::Allocate2MB();
@@ -173,7 +179,7 @@ namespace Devices::USB::MassStorage::BBB {
                 Log::putsSafe("[BBB] Failed to allocate physical memory for I/O buffer\n\r");
             }
 
-            return Optional<USB::Driver*>();
+            return {};
         }
 
         void* io_buffer = VirtualMemory::MapGeneralPages(
@@ -192,15 +198,15 @@ namespace Devices::USB::MassStorage::BBB {
                 Log::putsSafe("[BBB] Failed to map virtual memory for I/O buffer\n\r");
             }
 
-            return Optional<USB::Driver*>();
+            return {};
         }
 
         StorageInfo storage_info = {
             .max_lun = max_lun,
-            .drivers = static_cast<Storage::Driver**>(Heap::Allocate(sizeof(Storage::Driver*) * (max_lun + 1)))
+            .drivers = kern::make_unique<kern::shared_ptr<Storage::Driver>[]>(max_lun + 1)
         };
 
-        if (storage_info.drivers == nullptr) {
+        if (!storage_info.drivers) {
             if constexpr (Debug::DEBUG_BBB_ERRORS) {
                 Log::printfSafe("[BBB] Failed to allocate memory for storage drivers (max LUN: %d)\n\r", max_lun);
             }
@@ -208,48 +214,50 @@ namespace Devices::USB::MassStorage::BBB {
             VirtualMemory::UnmapGeneralPages(io_buffer, 1);
             PhysicalMemory::Free2MB(phys_io_buffer);
             
-            return Optional<USB::Driver*>();
+            return {};
         }
 
         for (size_t i = 0; i <= max_lun; ++i) {
-            storage_info.drivers[i] = nullptr;
+            storage_info.drivers[i] = {};
         }
 
-        Driver* driver = static_cast<Driver*>(Heap::Allocate(sizeof(Driver)));
+        kern::shared_ptr<Driver> driver = kern::make_shared<Driver>(
+            device,
+            std::move(storage_info),
+            EndpointsInfo { .bulkIn = bulk_in_ep, .bulkOut = bulk_out_ep },
+            IOBufferInfo { .pointer = io_buffer, .physical_pointer = phys_io_buffer }
+        );
 
-        if (driver == nullptr) {
+        if (!driver) {
             if constexpr (Debug::DEBUG_BBB_ERRORS) {
                 Log::printfSafe("[BBB] Failed to allocate memory for bulk-only transport driver\n\r");
             }
 
             VirtualMemory::UnmapGeneralPages(io_buffer, 1);
             PhysicalMemory::Free2MB(phys_io_buffer);
-            Heap::Free(storage_info.drivers);
 
-            return Optional<USB::Driver*>();
+            return {};
         }
 
-        new (driver) Driver(
-            device,
-            storage_info,
-            { .bulkIn = bulk_in_ep, .bulkOut = bulk_out_ep },
-            { .pointer = io_buffer, .physical_pointer = phys_io_buffer }
-        );
-
         static constexpr uint8_t TRANSPARENT_SCSI_USB_SUBCLASS = 0x06;
+
+        Log::printfSafe("[BBB] Mass storage controller has max LUN %d\n\r", max_lun);
 
         for (size_t i = 0; i <= max_lun; ++i) {
             switch (function->functionSubClass) {
                 case TRANSPARENT_SCSI_USB_SUBCLASS: {
-                    const auto scsi_driver_wrapper = Storage::SCSI::Driver::Create(*driver, i);
+                    const auto scsi_driver = Storage::SCSI::Driver::Create(
+                        kern::static_pointer_cast<Storage::Controller>(driver),
+                        i
+                    );
 
-                    if (!scsi_driver_wrapper.HasValue()) {
+                    if (!scsi_driver) {
                         if constexpr (Debug::DEBUG_BBB_ERRORS) {
                             Log::printfSafe("[BBB] Failed to create SCSI driver for LUN %d\n\r", i);
                         }
                     }
                     else {
-                        storage_info.drivers[i] = scsi_driver_wrapper.GetValue();
+                        driver->storage_info.drivers[i] = kern::static_pointer_cast<Storage::Driver>(scsi_driver);
                     }
 
                     break;
@@ -265,8 +273,8 @@ namespace Devices::USB::MassStorage::BBB {
         }
 
         for (size_t i = 0; i <= max_lun; ++i) {
-            if (storage_info.drivers[i] != nullptr) {
-                return Optional<USB::Driver*>(driver);
+            if (driver->storage_info.drivers[i]) {
+                return kern::static_pointer_cast<USB::Driver>(driver);
             }
         }
 
@@ -275,9 +283,8 @@ namespace Devices::USB::MassStorage::BBB {
         }
 
         driver->Release();
-        Heap::Free(driver);
 
-        return Optional<USB::Driver*>();
+        return {};
     }
 
     const xHCI::TRB* Driver::GetAwaitingTRB() const {
@@ -291,8 +298,10 @@ namespace Devices::USB::MassStorage::BBB {
 
     Success Driver::PostInitialization() {
         for (size_t i = 0; i <= storage_info.max_lun; ++i) {
-            if (storage_info.drivers[i] != nullptr) {
-                if (!storage_info.drivers[i]->PostInitialization().IsSuccess()) {
+            const auto& driver = storage_info.drivers[i];
+
+            if (driver) {
+                if (!driver->PostInitialization(driver).IsSuccess()) {
                     if constexpr (Debug::DEBUG_BBB_ERRORS) {
                         Log::printfSafe("[BBB] Post-initialization failed for storage driver of LUN %d\n\r", i);
                     }
@@ -306,15 +315,15 @@ namespace Devices::USB::MassStorage::BBB {
     }
 
     void Driver::Release() {
-        if (storage_info.drivers != nullptr) {
+        if (storage_info.drivers) {
             for (size_t i = 0; i <= storage_info.max_lun; ++i) {
-                if (storage_info.drivers[i] != nullptr) {
-                    storage_info.drivers[i]->Destroy();
+                if (storage_info.drivers[i]) {
+                    storage_info.drivers[i]->Eject();
+                    storage_info.drivers[i] = {};
                 }
             }
 
-            Heap::Free(storage_info.drivers);
-            storage_info.drivers = nullptr;
+            storage_info.drivers = {};
         }
 
         if (io_buffer != nullptr) {
@@ -325,6 +334,8 @@ namespace Devices::USB::MassStorage::BBB {
             if (phys_io_buffer.HasValue()) {
                 PhysicalMemory::Free2MB(phys_io_buffer.GetValue());
             }
+
+            io_buffer = nullptr;
         }
     }
 

@@ -24,6 +24,8 @@
 #include <fs/NPFS.hpp>
 #include <fs/Status.hpp>
 
+#include <kern/memory.hpp>
+
 #include <mm/Heap.hpp>
 #include <mm/Utils.hpp>
 
@@ -244,7 +246,7 @@ namespace {
         size_t size = 0;
     };
 
-    static size_t GetEffectiveEnd(size_t offset, size_t count, size_t size) {
+    static constexpr size_t GetEffectiveEnd(size_t offset, size_t count, size_t size) {
         if (offset + count > size || offset + count < offset) {
             return size;
         }
@@ -254,15 +256,14 @@ namespace {
 }
 
 struct NPFS::Directory::DirectoryEntry {
-    FS::IFNode* node;
-    size_t length;
+    kern::shared_ptr<IFNode> node;
     const char* name;
-    uint64_t _pad;
+    uint64_t    length;
 };
 
 FS::Response<NPFS::Directory::DirectoryEntry*> NPFS::Directory::FindEntry(const FS::DirectoryEntry& fileref) {
     if (fileref.Name == nullptr || fileref.NameLength == 0) {
-        return FS::Response<DirectoryEntry*>(FS::Status::INVALID_PARAMETER);
+        return {FS::Status::INVALID_PARAMETER};
     }
 
     auto data = static_cast<DirectoryData*>(container);
@@ -271,7 +272,7 @@ FS::Response<NPFS::Directory::DirectoryEntry*> NPFS::Directory::FindEntry(const 
     const size_t blockSize = node->QueryBlockSize();
 
     if (blockSize % sizeof(DirectoryEntry) != 0) {
-        return FS::Response<DirectoryEntry*>(FS::Status::DEVICE_ERROR);
+        return {FS::Status::DEVICE_ERROR};
     }
 
     uint8_t* blk = node->GetWeakBlock(0);
@@ -282,39 +283,39 @@ FS::Response<NPFS::Directory::DirectoryEntry*> NPFS::Directory::FindEntry(const 
 
             if (ptr->length == fileref.NameLength) {
                 if (Utils::memcmp(ptr->name, fileref.Name, fileref.NameLength) == 0) {
-                    return FS::Response(ptr);
+                    return {ptr};
                 }
             }
         }
     }
 
-    return FS::Response<DirectoryEntry*>(FS::Status::NOT_FOUND);
+    return {FS::Status::NOT_FOUND};
 }
 
 NPFS::Directory::Directory(FS::Owner* owner) : FS::Directory(owner) {}
 
-FS::Response<FS::IFNode*> NPFS::Directory::Find(const FS::DirectoryEntry& fileref) {
+FS::Response<kern::shared_ptr<FS::IFNode>> NPFS::Directory::Find(const FS::DirectoryEntry& fileref) {
     Utils::LockGuard _{mut};
 
     auto result = FindEntry(fileref);
 
     if (result.CheckError()) {
-        return FS::Response<FS::IFNode*>(result.GetError());
+        return {result.GetError()};
     }
 
     auto node = result.GetValue()->node;
 
-    auto status = node->Open();
+    const auto status = node->CanBeOpened();
 
     if (status != FS::Status::SUCCESS) {
-        return FS::Response<FS::IFNode*>(status);
+        return {status};
     }
 
-    return FS::Response(node);
+    return {node};
 }
 
-FS::Status NPFS::Directory::CreateEntry(const DirectoryEntry* entry) {
-    auto status = FindEntry({ .NameLength = entry->length, .Name = entry->name });
+FS::Status NPFS::Directory::CreateEntry(const DirectoryEntry& entry) {
+    auto status = FindEntry({ .NameLength = entry.length, .Name = entry.name });
 
     if (!status.CheckError()) {
         return FS::Status::ALREADY_EXISTS;
@@ -340,7 +341,7 @@ FS::Status NPFS::Directory::CreateEntry(const DirectoryEntry* entry) {
             DirectoryEntry* ptr = &(reinterpret_cast<DirectoryEntry*>(blk))[j];
 
             if (ptr->length == 0) {
-                *ptr = *entry;
+                *ptr = entry;
                 return FS::Status::SUCCESS;
             }
         }
@@ -354,7 +355,7 @@ FS::Status NPFS::Directory::CreateEntry(const DirectoryEntry* entry) {
 
     Utils::memset(ptr, 0, blockSize);
 
-    *ptr = *entry;
+    *ptr = entry;
 
     return FS::Status::SUCCESS;
 }
@@ -364,106 +365,85 @@ FS::Status NPFS::Directory::Create(const FS::DirectoryEntry& fileref, FS::FileTy
         return FS::Status::INVALID_PARAMETER;
     }
 
-    char* nameCopy = static_cast<char*>(Heap::Allocate(fileref.NameLength));
+    kern::unique_ptr<char[]> nameCopy = kern::make_unique<char[]>(fileref.NameLength);
 
-    if (nameCopy == nullptr) {
+    if (!nameCopy) {
         return FS::Status::DEVICE_ERROR;
     }
 
-    Utils::memcpy(nameCopy, fileref.Name, fileref.NameLength);
+    Utils::memcpy(nameCopy.get(), fileref.Name, fileref.NameLength);
 
     DirectoryEntry entry;
 
     if (type == FS::FileType::FILE) {
-        void* mem = Heap::Allocate(sizeof(File));
+        kern::shared_ptr<File> file = kern::make_shared<File>(owner);
 
-        if (mem == nullptr) {
-            Heap::Free(nameCopy);
+        if (!file) {
+            return FS::Status::DEVICE_ERROR;
+        }
+        else if (!File::Construct(file.get()).IsSuccess()) {
             return FS::Status::DEVICE_ERROR;
         }
 
-        File* file = new(mem) File(owner);
-
-        if (!File::Construct(file).IsSuccess()) {
-            Heap::Free(nameCopy);
-            Heap::Free(mem);
-            return FS::Status::DEVICE_ERROR;
-        }
-
-        entry.node = file;
+        entry.node = kern::static_pointer_cast<FS::IFNode>(file);
         entry.length = fileref.NameLength;
-        entry.name = nameCopy;
+        entry.name = nameCopy.release();
     }
     else if (type == FS::FileType::DIRECTORY) {
-        void* mem = Heap::Allocate(sizeof(Directory));
+        kern::shared_ptr<Directory> directory = kern::make_shared<Directory>(owner);
 
-        if (mem == nullptr) {
-            Heap::Free(nameCopy);
+        if (!directory) {
+            return FS::Status::DEVICE_ERROR;
+        }
+        else if (!Directory::Construct(directory.get()).IsSuccess()) {
             return FS::Status::DEVICE_ERROR;
         }
 
-        Directory* directory = new(mem) Directory(owner);
-
-        if (!Directory::Construct(directory).IsSuccess()) {
-            Heap::Free(nameCopy);
-            Heap::Free(mem);
-            return FS::Status::DEVICE_ERROR;
-        }
-
-        entry.node = directory;
+        entry.node = kern::static_pointer_cast<FS::IFNode>(directory);
         entry.length = fileref.NameLength;
-        entry.name = nameCopy;
+        entry.name = nameCopy.release();
     }
     else {
-        Heap::Free(nameCopy);
         return FS::Status::INVALID_PARAMETER;
     }
 
     Utils::LockGuard _{mut};
 
-    auto status = CreateEntry(&entry);
-
-    if (status != FS::Status::SUCCESS) {
-        Heap::Free(nameCopy);
-        Heap::Free(entry.node);
-    }
-
-    return status;
+    return CreateEntry(entry);
 }
 
-FS::Status NPFS::Directory::AddNode(const FS::DirectoryEntry& fileref, FS::IFNode* node) {
+FS::Status NPFS::Directory::AddNode(const FS::DirectoryEntry& fileref, const kern::shared_ptr<FS::IFNode>& node) {
     if (fileref.Name == nullptr) {
         return FS::Status::INVALID_PARAMETER;
     }
 
-    char* nameCopy = static_cast<char*>(Heap::Allocate(fileref.NameLength));
+    kern::unique_ptr<char[]> nameCopy = kern::make_unique<char[]>(fileref.NameLength);
 
-    if (nameCopy == nullptr) {
+    if (!nameCopy) {
         return FS::Status::DEVICE_ERROR;
     }
 
-    Utils::memcpy(nameCopy, fileref.Name, fileref.NameLength);
+    Utils::memcpy(nameCopy.get(), fileref.Name, fileref.NameLength);
 
     DirectoryEntry entry = {
         .node = node,
+        .name = nameCopy.get(),
         .length = fileref.NameLength,
-        .name = nameCopy,
-        ._pad = 0
     };
 
     Utils::LockGuard _{mut};
 
-    auto status = CreateEntry(&entry);
+    auto status = CreateEntry(entry);
 
-    if (status != FS::Status::SUCCESS) {
-        Heap::Free(nameCopy);
+    if (status == FS::Status::SUCCESS) {
+        nameCopy.release();
     }
 
     return status;
 }
 
 FS::Status NPFS::Directory::Remove(const FS::DirectoryEntry& fileref) {    
-    FS::IFNode* node = nullptr;
+    kern::shared_ptr<FS::IFNode> node = {};
     
     {
         Utils::LockGuard _{mut};
@@ -477,15 +457,15 @@ FS::Status NPFS::Directory::Remove(const FS::DirectoryEntry& fileref) {
         DirectoryEntry* entry = result.GetValue();
 
         node = entry->node;
-        auto status = node->Open();
+        auto status = node->CanBeOpened();
 
         if (status == FS::Status::SUCCESS) {
             node->MarkForRemoval();
-
+            
             Heap::Free(const_cast<char*>(entry->name));
             entry->name = nullptr;
             entry->length = 0;
-            entry->node = nullptr;
+            entry->node = {};
         }
         else if (status != FS::Status::UNAVAILABLE) {
             return status;
@@ -495,8 +475,7 @@ FS::Status NPFS::Directory::Remove(const FS::DirectoryEntry& fileref) {
         }
     }
 
-    node->Close();
-
+    node->Unregister();
     return FS::Status::SUCCESS;
 }
 
@@ -548,6 +527,8 @@ FS::Status NPFS::Directory::Query([[maybe_unused]] const FS::QueryInfo& info) {
 }
 
 Success NPFS::Directory::Construct(Directory* directory) {
+    static_assert(sizeof(DirectoryEntry) == 32);
+
     DirectoryData* data = static_cast<DirectoryData*>(Heap::Allocate(sizeof(DirectoryData)));
 
     if (data == nullptr) {
@@ -563,17 +544,46 @@ Success NPFS::Directory::Construct(Directory* directory) {
     return Success();
 }
 
-void NPFS::Directory::Destroy(bool deleted) {
-    if (deleted) {
-        DirectoryData* data = static_cast<DirectoryData*>(container);
+void NPFS::Directory::Unregister() {
+    // remove all entries, which will mark them for removal, and they will be removed when all references to them are dropped
+    Utils::LockGuard _{mut};
 
-        /// TODO: mark all files for deletion
+    auto data = static_cast<DirectoryData*>(container);
+    auto node = &data->data;
 
-        data->data.Destroy();
+    const size_t blockSize = node->QueryBlockSize();
+    const size_t entrySize = sizeof(DirectoryEntry);
 
-        Heap::Free(data);
-        Heap::Free(this);
+    if (blockSize % entrySize != 0) {
+        return;
     }
+
+    const size_t entriesPerBlock = blockSize / entrySize;
+
+    uint8_t* blk = node->GetWeakBlock(0);
+
+    for (size_t i = 0; blk != nullptr; blk = node->GetWeakBlock(++i)) {
+        for (size_t j = 0; j < entriesPerBlock; ++j) {
+            DirectoryEntry* ptr = &(reinterpret_cast<DirectoryEntry*>(blk))[j];
+
+            if (ptr->length != 0) {
+                ptr->node->MarkForRemoval();
+                ptr->node->Unregister();
+                Heap::Free(const_cast<char*>(ptr->name));
+                ptr->name = nullptr;
+                ptr->length = 0;
+                ptr->node = {};
+            }
+        }
+    }
+}
+
+NPFS::Directory::~Directory() {
+    DirectoryData* data = static_cast<DirectoryData*>(container);
+
+    data->data.Destroy();
+
+    Heap::Free(data);
 }
 
 NPFS::File::File(FS::Owner* owner) : FS::File(owner) {}
@@ -583,7 +593,7 @@ FS::Response<size_t> NPFS::File::Read(size_t offset, size_t count, uint8_t* buff
     auto data = &fileinfo->data;
 
     if (offset >= fileinfo->size) {
-        return FS::Response<size_t>(0);
+        return {0};
     }
 
     const size_t blockSize = data->QueryBlockSize();
@@ -594,8 +604,10 @@ FS::Response<size_t> NPFS::File::Read(size_t offset, size_t count, uint8_t* buff
     const size_t firstBlock = offset / blockSize;
     const size_t lastBlock = end / blockSize;
 
-    size_t effectiveCount = end - offset;
-    uint8_t* const effectiveBufferEnd = buffer + effectiveCount;
+    const size_t initialEffectiveCount = end - offset;
+    uint8_t* const effectiveBufferEnd = buffer + initialEffectiveCount;
+
+    size_t effectiveCount = initialEffectiveCount;
 
     Utils::LockGuard _{mut};
 
@@ -606,7 +618,7 @@ FS::Response<size_t> NPFS::File::Read(size_t offset, size_t count, uint8_t* buff
             Utils::memcpy(buffer, blk + blockOffset, effectiveCount);
         }
 
-        return FS::Response(effectiveCount);
+        return {effectiveCount};
     }
     else if (blockOffset != 0) {
         const size_t untilNextBlock = blockSize - blockOffset;
@@ -637,7 +649,7 @@ FS::Response<size_t> NPFS::File::Read(size_t offset, size_t count, uint8_t* buff
     }
 
     if (offset % blockSize != 0 || effectiveCount % blockSize != 0) {
-        return FS::Response<size_t>(FS::Status::DEVICE_ERROR);
+        return {FS::Status::DEVICE_ERROR};
     }
 
     const size_t readFrom = offset / blockSize;
@@ -655,7 +667,7 @@ FS::Response<size_t> NPFS::File::Read(size_t offset, size_t count, uint8_t* buff
         }
     }
 
-    return FS::Response<size_t>(effectiveBufferEnd - buffer);
+    return {initialEffectiveCount};
 }
 
 FS::Response<size_t> NPFS::File::Write(size_t offset, size_t count, const uint8_t* buffer) {
@@ -676,7 +688,8 @@ FS::Response<size_t> NPFS::File::Write(size_t offset, size_t count, const uint8_
     const size_t firstBlock = offset / blockSize;
     const size_t lastBlock = end / blockSize;
 
-    const uint8_t* const bufferEnd = buffer + count;
+    const size_t initialCount = count;
+    const uint8_t* const bufferEnd = buffer + initialCount;
 
     if (end > fileinfo->size) {
         fileinfo->size = end;
@@ -688,12 +701,12 @@ FS::Response<size_t> NPFS::File::Write(size_t offset, size_t count, const uint8_
         uint8_t* blk = data->GetBlock(firstBlock);
 
         if (blk == nullptr) {
-            return FS::Response<size_t>(FS::Status::DEVICE_ERROR);
+            return {FS::Status::DEVICE_ERROR};
         }
 
         Utils::memcpy(blk + blockOffset, buffer, count);
 
-        return FS::Response(count);
+        return {count};
     }
     else if (blockOffset != 0) {
         const size_t untilNextBlock = blockSize - blockOffset;
@@ -701,7 +714,7 @@ FS::Response<size_t> NPFS::File::Write(size_t offset, size_t count, const uint8_
         uint8_t* blk = data->GetBlock(firstBlock);
 
         if (blk == nullptr) {
-            return FS::Response<size_t>(FS::Status::DEVICE_ERROR);
+            return {FS::Status::DEVICE_ERROR};
         }
 
         Utils::memcpy(blk + blockOffset, buffer, untilNextBlock);
@@ -715,7 +728,7 @@ FS::Response<size_t> NPFS::File::Write(size_t offset, size_t count, const uint8_
         uint8_t* blk = data->GetBlock(lastBlock);
 
         if (blk == nullptr) {
-            return FS::Response<size_t>(FS::Status::DEVICE_ERROR);
+            return {FS::Status::DEVICE_ERROR};
         }
 
         for (size_t i = 1; i <= remaining; ++i) {
@@ -726,7 +739,7 @@ FS::Response<size_t> NPFS::File::Write(size_t offset, size_t count, const uint8_
     }
 
     if (offset % blockSize != 0 || count % blockSize != 0) {
-        return FS::Response<size_t>(FS::Status::DEVICE_ERROR);
+        return {FS::Status::DEVICE_ERROR};
     }
 
     const size_t writeFrom = offset / blockSize;
@@ -737,16 +750,16 @@ FS::Response<size_t> NPFS::File::Write(size_t offset, size_t count, const uint8_
             uint8_t* blk = data->GetBlock(i);
 
             if (blk == nullptr) {
-                return FS::Response<size_t>(FS::Status::DEVICE_ERROR);
+                return {FS::Status::DEVICE_ERROR};
             }
 
-            Utils::memcmp(blk, buffer, blockSize);
+            Utils::memcpy(blk, buffer, blockSize);
             
             buffer += blockSize;
         }
     }
 
-    return FS::Response<size_t>(bufferEnd - buffer);
+    return {initialCount};
 }
 
 FS::Status NPFS::File::Query([[maybe_unused]] const FS::QueryInfo& info) {
@@ -771,21 +784,31 @@ Success NPFS::File::Construct(File* file) {
     return Success();
 }
 
-void NPFS::File::Destroy(bool deleted) {
-    if (deleted) {
-        FileData* data = static_cast<FileData*>(container);
-
-        data->data.Destroy();
-
-        Heap::Free(data);
-        Heap::Free(this);
-    }
+void NPFS::File::Unregister() {
+    // nothing to do, as a file is leaf, so unregistering it
+    // already marked it for removal, and it is already no
+    // longer findable in the directory,
+    // so it will be removed and deleted/destroyed when all references to it are dropped
 }
 
-NPFS::NPFS() : root(this) {}
+NPFS::File::~File() {
+    FileData* data = static_cast<FileData*>(container);
+
+    data->data.Destroy();
+
+    Heap::Free(data);
+}
+
+NPFS::NPFS() {}
 
 Success NPFS::Construct(NPFS* fs) {
     auto newfs = new(fs) NPFS;
 
-    return Directory::Construct(&newfs->root);
+    newfs->root = kern::make_shared<Directory>(newfs);
+
+    if (!newfs->root) {
+        return Failure();
+    }
+
+    return Directory::Construct(newfs->root.get());
 }

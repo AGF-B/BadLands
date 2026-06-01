@@ -19,17 +19,23 @@
 #include <devices/USB/Driver.hpp>
 #include <devices/USB/xHCI/Device.hpp>
 
+#include <kern/memory.hpp>
+
 namespace Devices {
     namespace USB {
         namespace MassStorage {
             class Driver : public USB::Driver{
             protected:
-                Driver(xHCI::Device& device);
+                Driver(const kern::shared_ptr<xHCI::Device>& device);
 
             public:
                 static inline constexpr uint8_t GetClassCode() { return 0x08; }
 
-                static Optional<USB::Driver*> Create(xHCI::Device& device, uint8_t configurationValue, const xHCI::Device::FunctionDescriptor* function);
+                static kern::shared_ptr<USB::Driver> Create(
+                    const kern::shared_ptr<xHCI::Device>& device,
+                    uint8_t configurationValue,
+                    const xHCI::Device::FunctionDescriptor* function
+                );
             };
         }
     }

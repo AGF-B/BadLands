@@ -24,6 +24,10 @@
 #include <devices/USB/xHCI/Specification.hpp>
 #include <devices/USB/xHCI/TRB.hpp>
 
+#include <kern/memory.hpp>
+
+#include <mm/MemoryProvider.hpp>
+
 namespace Devices {
     namespace USB {
         namespace HID {
@@ -84,7 +88,12 @@ namespace Devices {
                 uint8_t* reportBuffer = nullptr;
                 const xHCI::TRB* volatile last_sent_trb = nullptr;
 
-                Driver(const xHCI::Device& device, const xHCI::Device::FunctionDescriptor* function, const HIDHierarchy& hierarchy, uint8_t* buffer);
+                Driver(
+                    const kern::shared_ptr<xHCI::Device>& device,
+                    const xHCI::Device::FunctionDescriptor* function,
+                    const HIDHierarchy& hierarchy,
+                    uint8_t* buffer
+                );
 
                 void InitiateTransaction();
 
@@ -94,6 +103,9 @@ namespace Devices {
                 static Optional<HIDDescriptor> ParseHIDDescriptor(const uint8_t* data, size_t length);
 
                 void HandleTransactionComplete();
+
+                template<class T, MemoryProvider Provider, class... Args>
+                friend constexpr kern::shared_ptr<T, Provider> kern::make_shared(Args&&... args);
 
             public:
                 class ReportDescriptor {
@@ -197,7 +209,11 @@ namespace Devices {
 
                 static inline constexpr uint8_t GetClassCode() { return 0x03; }
                 
-                static Optional<Driver*> Create(xHCI::Device& device, uint8_t configuration_value, const xHCI::Device::FunctionDescriptor* function);
+                static kern::shared_ptr<USB::Driver> Create(
+                    const kern::shared_ptr<xHCI::Device>& device,
+                    uint8_t configuration_value,
+                    const xHCI::Device::FunctionDescriptor* function
+                );
 
                 virtual const xHCI::TRB* GetAwaitingTRB() const override;
                 virtual void HandleEvent(const xHCI::TransferEventTRB& trb) override;

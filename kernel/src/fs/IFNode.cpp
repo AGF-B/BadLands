@@ -18,34 +18,20 @@
 namespace FS {
     IFNode::IFNode(Owner* owner) : owner(owner) {}
 
-    FS::Status IFNode::Open() {
-        if (ShouldBeRemoved()) {
-            return FS::Status::UNAVAILABLE;
-        }
-
-        ++openReferences;
-
-        return FS::Status::SUCCESS;
-    }
-
-    void IFNode::Close() {
-        --openReferences;
-
-        if (openReferences == 0) {
-            Destroy(ShouldBeRemoved());
-        }
-    }
-
-    size_t IFNode::GetOpenReferences() {
-        return openReferences;
-    }
-
     void IFNode::MarkForRemoval() {
         removed = true;
     }
 
-    bool IFNode::ShouldBeRemoved() {
+    bool IFNode::ShouldBeRemoved() const {
         return removed;
+    }
+
+    FS::Status IFNode::CanBeOpened() const {
+        if (ShouldBeRemoved()) {
+            return FS::Status::UNAVAILABLE;
+        }
+
+        return FS::Status::SUCCESS;
     }
 
     Directory::Directory(Owner* owner) : IFNode(owner) {}
@@ -64,15 +50,15 @@ namespace FS {
 
     File::File(Owner* owner) : IFNode(owner) {}
 
-    Response<IFNode*> File::Find([[maybe_unused]] const DirectoryEntry& fileref) {
-        return Response<IFNode*>(Status::UNSUPPORTED);
+    Response<kern::shared_ptr<IFNode>> File::Find([[maybe_unused]] const DirectoryEntry& fileref) {
+        return Response<kern::shared_ptr<IFNode>>(Status::UNSUPPORTED);
     }
 
     Status File::Create([[maybe_unused]] const DirectoryEntry& fileref, [[maybe_unused]] FileType type) {
         return Status::UNSUPPORTED;
     }
 
-    Status File::AddNode([[maybe_unused]] const DirectoryEntry& fileref, [[maybe_unused]] IFNode* node) {
+    Status File::AddNode([[maybe_unused]] const DirectoryEntry& fileref, [[maybe_unused]] const kern::shared_ptr<IFNode>& node) {
         return Status::UNSUPPORTED;
     }
 

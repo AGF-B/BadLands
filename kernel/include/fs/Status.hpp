@@ -41,7 +41,7 @@ namespace FS {
     template<typename V>
     class Response : public ::Response<Status, V> {
     public:
-        explicit inline Response(Status status) : ::Response<Status, V>(status) {}
-        explicit inline Response(V value) : ::Response<Status, V>(value) {}
+        inline Response(Status status) : ::Response<Status, V>(status) {}
+        inline Response(V value) : ::Response<Status, V>(value) {}
     };
 }

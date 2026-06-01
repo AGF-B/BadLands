@@ -17,8 +17,10 @@
 #include <fs/IFNode.hpp>
 #include <fs/VFS.hpp>
 
+#include <kern/memory.hpp>
+
 namespace Devices {
 	namespace KeyboardDispatcher {
-		FS::IFNode* Initialize(FS::IFNode* deviceInterface);
+		kern::shared_ptr<FS::IFNode> Initialize(const kern::shared_ptr<FS::IFNode>& deviceInterface);
 	}
 }

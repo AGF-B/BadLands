@@ -277,12 +277,12 @@ namespace Devices {
                     static constexpr size_t MAX_DRIVERS = 7;
 
                     DriversNode* next = nullptr;
-                    USB::Driver* drivers[MAX_DRIVERS] = { nullptr };
+                    kern::shared_ptr<USB::Driver> drivers[MAX_DRIVERS] = { { } };
                 };
 
                 DriversNode* drivers = nullptr;
 
-                Success AddDriver(USB::Driver* driver);
+                Success AddDriver(const kern::shared_ptr<USB::Driver>& driver);
                 Optional<USB::Driver*> FindDriverEvent(const TransferEventTRB& trb) const;
                 void ReleaseDrivers();
 
@@ -292,7 +292,7 @@ namespace Devices {
                 const DeviceInformation& GetInformation() const;
                 const void* GetOutputDeviceContext() const;
 
-                Success Initialize();
+                Success Initialize(const kern::shared_ptr<Device>& self);
                 Success PostInitialization();
                 void Destroy();
 

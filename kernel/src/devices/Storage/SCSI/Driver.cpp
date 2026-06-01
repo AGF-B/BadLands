@@ -25,6 +25,8 @@
 #include <devices/Block/Device.hpp>
 #include <devices/Storage/SCSI/Driver.hpp>
 
+#include <kern/memory.hpp>
+
 #include <mm/Heap.hpp>
 
 #include <screen/Log.hpp>
@@ -47,7 +49,7 @@ namespace Devices::Storage::SCSI {
             .lun = lun
         };
 
-        if (!controller.SendCommand(payload).IsSuccess()) {
+        if (!controller->SendCommand(payload).IsSuccess()) {
             if constexpr (Debug::DEBUG_SCSI_ERRORS) {
                 Log::printfSafe("[SCSI] Failed to send READ CAPACITY(10) command for LUN %d\n\r", lun);
             }
@@ -75,7 +77,7 @@ namespace Devices::Storage::SCSI {
             .lun = lun
         };
 
-        if (!controller.SendCommand(payload).IsSuccess()) {
+        if (!controller->SendCommand(payload).IsSuccess()) {
             if constexpr (Debug::DEBUG_SCSI_ERRORS) {
                 Log::printfSafe("[SCSI] Failed to send READ CAPACITY(16) command for LUN %d\n\r", lun);
             }
@@ -98,7 +100,7 @@ namespace Devices::Storage::SCSI {
             return Optional<CapacityInformation>();
         }
 
-        if (capacity10.GetValue().blocksCount == CAPACITY_10_OVERFLOW && controller.GetMaxDataTransferLength() >= 16) {
+        if (capacity10.GetValue().blocksCount == CAPACITY_10_OVERFLOW && controller->GetMaxDataTransferLength() >= 16) {
             use_extended_methods = true;
             return ReadCapacity16();
         }
@@ -109,7 +111,7 @@ namespace Devices::Storage::SCSI {
     Success Driver::SendReadCommand(uint64_t startBlock, uint64_t blocksCount, uint8_t* buffer) {
         const uint64_t transferSize = blocksCount * capacity.blockSize;
 
-        if (transferSize > controller.GetMaxDataTransferLength()) {
+        if (transferSize > controller->GetMaxDataTransferLength()) {
             if constexpr (Debug::DEBUG_SCSI_ERRORS) {
                 Log::printfSafe("[SCSI] Read transfer size too large for LUN %d: %d bytes\n\r", lun, transferSize);
             }
@@ -148,7 +150,7 @@ namespace Devices::Storage::SCSI {
                 .lun = lun
             };
 
-            if (!controller.SendCommand(payload).IsSuccess()) {
+            if (!controller->SendCommand(payload).IsSuccess()) {
                 if constexpr (Debug::DEBUG_SCSI_ERRORS) {
                     Log::printfSafe("[SCSI] Failed to send READ(10) command for LUN %d\n\r", lun);
                 }
@@ -193,7 +195,7 @@ namespace Devices::Storage::SCSI {
                 .lun = lun
             };
 
-            if (!controller.SendCommand(payload).IsSuccess()) {
+            if (!controller->SendCommand(payload).IsSuccess()) {
                 if constexpr (Debug::DEBUG_SCSI_ERRORS) {
                     Log::printfSafe("[SCSI] Failed to send READ(16) command for LUN %d\n\r", lun);
                 }
@@ -208,7 +210,7 @@ namespace Devices::Storage::SCSI {
     Success Driver::SendWriteCommand(uint64_t startBlock, uint64_t blocksCount, const uint8_t* buffer) {
         const uint64_t transferSize = blocksCount * capacity.blockSize;
 
-        if (transferSize > controller.GetMaxDataTransferLength()) {
+        if (transferSize > controller->GetMaxDataTransferLength()) {
             if constexpr (Debug::DEBUG_SCSI_ERRORS) {
                 Log::printfSafe("[SCSI] Read transfer size too large for LUN %d: %d bytes\n\r", lun, transferSize);
             }
@@ -247,7 +249,7 @@ namespace Devices::Storage::SCSI {
                 .lun = lun
             };
 
-            if (!controller.SendCommand(payload).IsSuccess()) {
+            if (!controller->SendCommand(payload).IsSuccess()) {
                 if constexpr (Debug::DEBUG_SCSI_ERRORS) {
                     Log::printfSafe("[SCSI] Failed to send WRITE(10) command for LUN %d\n\r", lun);
                 }
@@ -292,7 +294,7 @@ namespace Devices::Storage::SCSI {
                 .lun = lun
             };
 
-            if (!controller.SendCommand(payload).IsSuccess()) {
+            if (!controller->SendCommand(payload).IsSuccess()) {
                 if constexpr (Debug::DEBUG_SCSI_ERRORS) {
                     Log::printfSafe("[SCSI] Failed to send WRITE(16) command for LUN %d\n\r", lun);
                 }
@@ -304,28 +306,26 @@ namespace Devices::Storage::SCSI {
         return Success();
     }
 
-    Optional<Driver*> Driver::Create(Storage::Controller& controller, uint8_t lun) {
-        void* driver_memory = Heap::Allocate(sizeof(Driver));
+    kern::shared_ptr<Driver> Driver::Create(const kern::shared_ptr<Storage::Controller>& controller, uint8_t lun) {
+        kern::shared_ptr<Driver> driver = kern::make_shared<Driver>(controller, lun);
 
-        if (driver_memory == nullptr) {
+        if (!driver) {
             if constexpr (Debug::DEBUG_SCSI_ERRORS) {
                 Log::printfSafe("[SCSI] Failed to allocate memory for driver of LUN %d\n\r", lun);
             }
 
-            return Optional<Driver*>();
+            return {};
         }
 
-        Driver* driver = new (driver_memory) Driver(controller, lun);
-
-        return Optional(driver);
+        return driver;
     }
 
-    void Driver::Destroy() {
-        device->DestroyDevice();
-        Heap::Free(this);
+    void Driver::Eject() {
+        device->Eject();
+        device = {};
     }
 
-    Success Driver::PostInitialization() {
+    Success Driver::PostInitialization(const kern::shared_ptr<Storage::Driver>& self) {
         const auto capacity = ReadCapacity();
 
         if (!capacity.HasValue()) {
@@ -346,9 +346,10 @@ namespace Devices::Storage::SCSI {
             return Failure();
         }
 
-        auto device_wrapper = Block::Device::AddDevice(this);
+        auto scsi_self = kern::static_pointer_cast<Driver>(self);
+        device = Block::Device::AddDevice(kern::static_pointer_cast<Block::Interface>(scsi_self));
 
-        if (!device_wrapper.HasValue()) {
+        if (!device) {
             if constexpr (Debug::DEBUG_SCSI_ERRORS) {
                 Log::printfSafe("[SCSI] Failed to add block device for LUN %d\n\r", lun);
             }
@@ -356,14 +357,12 @@ namespace Devices::Storage::SCSI {
             return Failure();
         }
 
-        device = device_wrapper.GetValue();
-
         return Success();
     }
 
     Success Driver::ReadBlocks(uint64_t startBlock, uint64_t blocksCount, uint8_t* buffer) {
         uint64_t transferSize = blocksCount * capacity.blockSize;
-        const uint64_t maxAtomicTransferSize = controller.GetMaxDataTransferLength();
+        const uint64_t maxAtomicTransferSize = controller->GetMaxDataTransferLength();
 
         while (transferSize > maxAtomicTransferSize) {
             uint64_t blocksToTransfer = maxAtomicTransferSize / capacity.blockSize;
@@ -390,7 +389,7 @@ namespace Devices::Storage::SCSI {
 
     Success Driver::WriteBlocks(uint64_t startBlock, uint64_t blocksCount, const uint8_t* buffer) {
         uint64_t transferSize = blocksCount * capacity.blockSize;
-        const uint64_t maxAtomicTransferSize = controller.GetMaxDataTransferLength();
+        const uint64_t maxAtomicTransferSize = controller->GetMaxDataTransferLength();
 
         while (transferSize > maxAtomicTransferSize) {
             uint64_t blocksToTransfer = maxAtomicTransferSize / capacity.blockSize;

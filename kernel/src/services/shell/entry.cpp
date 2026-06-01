@@ -29,6 +29,8 @@
 
 #include <interrupts/Panic.hpp>
 
+#include <kern/memory.hpp>
+
 #include <mm/Heap.hpp>
 #include <mm/Utils.hpp>
 
@@ -55,7 +57,7 @@ namespace {
         char* displayedPath = nullptr;
         size_t displayedPathLength = 0;
         size_t displayedPathCapacity = 0;
-        FS::IFNode* currentDirectory = nullptr;
+        kern::shared_ptr<FS::IFNode> currentDirectory = {};
 
     public:
         static Optional<CommandContext> Create() {
@@ -92,12 +94,12 @@ namespace {
             return displayedPath;
         }
 
-        FS::IFNode* GetCurrentDirectory() const {
-            return currentDirectory;
+        FS::IFNode* GetCurrentDirectory() {
+            return currentDirectory.get();
         }
 
-        void OpenSubdirectory(FS::IFNode* newDirectory, const char* addedPath, size_t addedPathLength) {
-            if (newDirectory != nullptr && addedPath != nullptr && addedPathLength > 0) {
+        void OpenSubdirectory(kern::shared_ptr<FS::IFNode> newDirectory, const char* addedPath, size_t addedPathLength) {
+            if (newDirectory && addedPath != nullptr && addedPathLength > 0) {
                 currentDirectory = newDirectory;
 
                 // +1 for the '/' character
@@ -127,7 +129,7 @@ namespace {
         }
 
         void OpenParentDirectory() {
-            if (currentDirectory != nullptr) {
+            if (currentDirectory) {
                 FS::DirectoryEntry filename;
 
                 auto parentResponse = Kernel::Exports.vfs->OpenParent(FS::DirectoryEntry {
@@ -395,9 +397,9 @@ namespace {
                         }
                     }
                     else {
-                        FS::IFNode* node = response.GetValue();
+                        kern::shared_ptr<FS::IFNode> node = response.GetValue();
 
-                        if (node == nullptr || !node->IsDirectory()) {
+                        if (!node || !node->IsDirectory()) {
                             Log::putsSafe("[SHELL] The specified path is not a valid directory\n\r");
                         }
                         else {

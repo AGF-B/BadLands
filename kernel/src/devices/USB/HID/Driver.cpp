@@ -28,6 +28,8 @@
 #include <devices/USB/xHCI/Specification.hpp>
 #include <devices/USB/xHCI/TRB.hpp>
 
+#include <kern/memory.hpp>
+
 #include <mm/Heap.hpp>
 #include <mm/IOHeap.hpp>
 #include <mm/Paging.hpp>
@@ -35,7 +37,12 @@
 #include <screen/Log.hpp>
 
 namespace Devices::USB::HID {
-    Driver::Driver(const xHCI::Device& device, const xHCI::Device::FunctionDescriptor* function, const HIDHierarchy& hierarchy, uint8_t* buffer)
+    Driver::Driver(
+        const kern::shared_ptr<xHCI::Device>& device,
+        const xHCI::Device::FunctionDescriptor* function,
+        const HIDHierarchy& hierarchy,
+        uint8_t* buffer
+    )
         : USB::Driver{device}, function{function}, hierarchy{hierarchy}, reportBuffer{buffer} { }
 
     Success Driver::HIDHierarchy::AddDevice(InterfaceDevice* device) {
@@ -578,7 +585,11 @@ namespace Devices::USB::HID {
         return Optional<HIDHierarchy>(hierarchy);
     }
 
-    Optional<Driver*> Driver::Create(xHCI::Device& device, uint8_t configuration_value, const xHCI::Device::FunctionDescriptor* function) {
+    kern::shared_ptr<USB::Driver> Driver::Create(
+        const kern::shared_ptr<xHCI::Device>& device,
+        uint8_t configuration_value,
+        const xHCI::Device::FunctionDescriptor* function
+    ) {
         if (function->interfacesNumber != 1) {
             if constexpr (Debug::DEBUG_HID_ERRORS) {
                 Log::printfSafe(
@@ -587,7 +598,7 @@ namespace Devices::USB::HID {
                 );
             }
 
-            return Optional<Driver*>();
+            return {};
         }
 
         auto* interface = function->interfaces;  
@@ -595,7 +606,7 @@ namespace Devices::USB::HID {
         auto hid_descriptor_wrapper = GetHIDDescriptor(interface);
 
         if (!hid_descriptor_wrapper.HasValue()) {
-            return Optional<Driver*>();
+            return {};
         }
 
         auto hid_descriptor = hid_descriptor_wrapper.GetValue();
@@ -610,14 +621,14 @@ namespace Devices::USB::HID {
                 );
             }
 
-            return Optional<Driver*>();
+            return {};
         }
 
         static constexpr uint8_t REQUEST_TYPE_INTERFACE_IN = 0x81;
         static constexpr uint8_t REQUEST_GET_DESCRIPTOR = 6;
 
         if (!SendRequest(
-            device,
+            *device,
             REQUEST_TYPE_INTERFACE_IN,
             REQUEST_GET_DESCRIPTOR,
             static_cast<uint16_t>((static_cast<uint16_t>(HID_REPORT_DESCRIPTOR_TYPE) << 8) | 0),
@@ -631,7 +642,7 @@ namespace Devices::USB::HID {
             }
 
             IOHeap::Free(buffer);
-            return Optional<Driver*>();
+            return {};
         }
 
         ReportDescriptor report_descriptor(buffer, hid_descriptor.reportDescriptorLength);
@@ -646,7 +657,7 @@ namespace Devices::USB::HID {
             }
 
             IOHeap::Free(buffer);
-            return Optional<Driver*>();
+            return {};
         }
 
         if constexpr (Debug::DEBUG_HID_INFO) {
@@ -657,13 +668,13 @@ namespace Devices::USB::HID {
 
         auto hierarchy = hierarchy_wrapper.GetValue();
 
-        if (!SetConfiguration(device, configuration_value).IsSuccess()) {
+        if (!SetConfiguration(*device, configuration_value).IsSuccess()) {
             if constexpr (Debug::DEBUG_HID_ERRORS) {
                 Log::printfSafe("[HID] Could not set device configuration to %u\n\r", configuration_value);
             }
 
             hierarchy.Release();
-            return Optional<Driver*>();
+            return {};
         }
 
         xHCI::Device::InterfaceDescriptor* config_interface = function->interfaces;
@@ -672,13 +683,13 @@ namespace Devices::USB::HID {
             for (size_t i = 0; i < config_interface->endpointsNumber; ++i) {
                 const auto& endpoint = config_interface->endpoints[i];
                 
-                if (!ConfigureEndpoint(device, endpoint).IsSuccess()) {
+                if (!ConfigureEndpoint(*device, endpoint).IsSuccess()) {
                     if constexpr (Debug::DEBUG_HID_ERRORS) {
                         Log::printfSafe("[HID] Could not configure endpoint 0x%0.2hhx\n\r", endpoint.endpointAddress);
                     }
 
                     hierarchy.Release();
-                    return Optional<Driver*>();
+                    return {};
                 }
 
                 if constexpr (Debug::DEBUG_HID_INFO) {
@@ -698,23 +709,26 @@ namespace Devices::USB::HID {
             }
 
             hierarchy.Release();
-            return Optional<Driver*>();
+            return {};
         }
 
-        auto* const raw_device = Heap::Allocate(sizeof(Driver));
+        kern::shared_ptr<Driver> hid_driver = kern::make_shared<Driver>(
+            device,
+            function,
+            hierarchy_wrapper.GetValue(),
+            reportBuffer
+        );
 
-        if (raw_device == nullptr) {
+        if (!hid_driver) {
             if constexpr (Debug::DEBUG_HID_ERRORS) {
                 Log::printfSafe("[HID] Could not allocate memory for HID device\n\r");
             }
 
             hierarchy_wrapper.GetValue().Release();
-            return Optional<Driver*>();
+            return {};
         }
 
-        auto* const hid_driver = new (raw_device) Driver(device, function, hierarchy_wrapper.GetValue(), reportBuffer);
-
-        return Optional<Driver*>(hid_driver);
+        return kern::static_pointer_cast<USB::Driver>(hid_driver);
     }
 
     const xHCI::TRB* Driver::GetAwaitingTRB() const {

@@ -33,7 +33,11 @@ bool VFS::IsApplicationPath(const FS::DirectoryEntry& filepath) {
     return filepath.Name[1] != '/';
 }
 
-FS::Status VFS::HandleApplicationPath(const FS::DirectoryEntry& filepath, FS::DirectoryEntry& current, FS::IFNode*& node) {
+FS::Status VFS::HandleApplicationPath(
+    const FS::DirectoryEntry& filepath,
+    FS::DirectoryEntry& current,
+    kern::shared_ptr<FS::IFNode>& node
+) {
     const char applicationBase[] = "partitions";
 
     current.NameLength = 0;
@@ -45,7 +49,6 @@ FS::Status VFS::HandleApplicationPath(const FS::DirectoryEntry& filepath, FS::Di
             return result.GetError();
         }
 
-        node->Close();
         node = result.GetValue();
 
         current.Name = filepath.Name + 1;
@@ -54,19 +57,19 @@ FS::Status VFS::HandleApplicationPath(const FS::DirectoryEntry& filepath, FS::Di
         current.Name = filepath.Name + 2;
     }
 
-    return FS::Status::SUCCESS;
+    return {FS::Status::SUCCESS};
 }
 
 FS::Response<FS::DirectoryEntry> VFS::ExtractFileName(const FS::DirectoryEntry& filepath) {
     if (filepath.Name == nullptr || filepath.NameLength == 0 || filepath.NameLength > FS::MAX_FILE_PATH) {
-        return FS::Response<FS::DirectoryEntry>(FS::Status::INVALID_PARAMETER);
+        return {FS::Status::INVALID_PARAMETER};
     }
 
     FS::DirectoryEntry filename = { .NameLength = 0, .Name = filepath.Name + filepath.NameLength - 1 };
 
     if (filename.Name[0] == '/') {
         if (filepath.NameLength == 1) {
-            return FS::Response(filename);
+            return {filename};
         }
 
         --filename.Name;
@@ -81,24 +84,30 @@ FS::Response<FS::DirectoryEntry> VFS::ExtractFileName(const FS::DirectoryEntry& 
         ++filename.Name;
     }
 
-    return FS::Response(filename);
+    return {filename};
 }
 
 Success VFS::Construct(VFS* fs) {
     auto newfs = new(fs) VFS;
 
-    return NPFS::Directory::Construct(&newfs->root);
+    newfs->root = kern::make_shared<Directory>(newfs);
+
+    if (!newfs->root) {
+        return Failure();
+    }
+
+    return NPFS::Directory::Construct(newfs->root.get());
 }
 
-FS::Response<FS::IFNode*> VFS::OpenParent(const FS::DirectoryEntry& filepath, FS::DirectoryEntry& filename) {
+FS::Response<kern::shared_ptr<FS::IFNode>> VFS::OpenParent(const FS::DirectoryEntry& filepath, FS::DirectoryEntry& filename) {
     if (!CheckFilePath(filepath)) {
-        return FS::Response<FS::IFNode*>(FS::Status::INVALID_PARAMETER);
+        return {FS::Status::INVALID_PARAMETER};
     }
 
     auto extracted = ExtractFileName(filepath);
 
     if (extracted.CheckError()) {
-        return FS::Response<FS::IFNode*>(extracted.GetError());
+        return {extracted.GetError()};
     }
 
     filename = extracted.GetValue();
@@ -106,18 +115,21 @@ FS::Response<FS::IFNode*> VFS::OpenParent(const FS::DirectoryEntry& filepath, FS
     const size_t parentPathLength = (size_t)(filename.Name - filepath.Name);
     FS::DirectoryEntry parentpath = { .NameLength = parentPathLength, .Name = filepath.Name };
 
-    auto status = root.Open();
+    auto status = root->CanBeOpened();
 
     if (status != FS::Status::SUCCESS) {
-        return FS::Response<FS::IFNode*>(status);
+        return {status};
     }
 
-    FS::IFNode* node = &root;
+    kern::shared_ptr<NPFS::Directory> local_root = root;
+
+    kern::shared_ptr<FS::IFNode> node = kern::static_pointer_cast<FS::IFNode>(local_root);
     FS::DirectoryEntry current;
 
-    if ((status = HandleApplicationPath(parentpath, current, node)) != FS::Status::SUCCESS) {
-        root.Close();
-        return FS::Response<FS::IFNode*>(status);
+    auto response = HandleApplicationPath(parentpath, current, node);
+
+    if (response != FS::Status::SUCCESS) {
+        return {response};
     }
 
     for (size_t i = (size_t)(current.Name - parentpath.Name); i < parentpath.NameLength; ++i) {
@@ -125,16 +137,13 @@ FS::Response<FS::IFNode*> VFS::OpenParent(const FS::DirectoryEntry& filepath, FS
 
         if (c == '/') {
             if (current.NameLength == 0) {
-                node->Close();
-                return FS::Response<FS::IFNode*>(FS::Status::INVALID_PARAMETER);
+                return {FS::Status::INVALID_PARAMETER};
             }
 
             auto result = node->Find(current);
-
-            node->Close();
             
             if (result.CheckError()) {
-                return FS::Response<FS::IFNode*>(result.GetError());
+                return {result.GetError()};
             }
             
             node = result.GetValue();
@@ -154,7 +163,7 @@ FS::Response<FS::IFNode*> VFS::OpenParent(const FS::DirectoryEntry& filepath, FS
     return FS::Response(node->Find(current));
 }
 
-FS::Response<FS::IFNode*> VFS::Open(const FS::DirectoryEntry& filepath) {
+FS::Response<kern::shared_ptr<FS::IFNode>> VFS::Open(const FS::DirectoryEntry& filepath) {
     FS::DirectoryEntry filename;
 
     auto result = OpenParent(filepath, filename);
@@ -166,8 +175,6 @@ FS::Response<FS::IFNode*> VFS::Open(const FS::DirectoryEntry& filepath) {
     auto node = result.GetValue();
 
     result = node->Find(filename);
-
-    node->Close();
 
     return result;
 }

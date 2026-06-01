@@ -21,12 +21,18 @@
 #include <devices/USB/xHCI/Device.hpp>
 #include <devices/USB/xHCI/TRB.hpp>
 
+#include <kern/memory.hpp>
+
 #include <screen/Log.hpp>
 
 namespace Devices::USB::MassStorage {
-    Driver::Driver(xHCI::Device& device) : USB::Driver{device} { }
+    Driver::Driver(const kern::shared_ptr<xHCI::Device>& device) : USB::Driver{device} { }
 
-    Optional<USB::Driver*> Driver::Create(xHCI::Device& device, uint8_t configurationValue, const xHCI::Device::FunctionDescriptor* function) {        
+    kern::shared_ptr<USB::Driver> Driver::Create(
+        const kern::shared_ptr<xHCI::Device>& device,
+        uint8_t configurationValue,
+        const xHCI::Device::FunctionDescriptor* function
+    ) {        
         static constexpr uint8_t BBB_PROTOCOL = 0x50;
         
         switch (function->functionProtocol) {
@@ -37,7 +43,7 @@ namespace Devices::USB::MassStorage {
                     Log::printfSafe("[USB] Unsupported Mass Storage protocol 0x%0.2hhx\r\n", function->functionProtocol);
                 }
 
-                return Optional<USB::Driver*>();
+                return {};
         }
     }
 }

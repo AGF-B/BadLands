@@ -12,19 +12,12 @@
 // You should have received a copy of the GNU General Public License along with this program.
 // If not, see <https://www.gnu.org/licenses/>.
 
-#pragma once
+// Stubs for C++ ABI symbols required by the compiler when static-duration
+// objects with non-trivial destructors are present. The kernel never exits,
+// so destructor registration is a no-op.
 
-#include <shared/Response.hpp>
+void* __dso_handle __attribute__((visibility("hidden"))) = nullptr;
 
-#include <kern/memory.hpp>
-
-namespace Devices {
-    namespace Storage {
-        class Driver {
-        public:
-            virtual void Eject() = 0;
-
-            virtual Success PostInitialization(const kern::shared_ptr<Driver>& self) = 0;
-        };
-    }
+extern "C" int __cxa_atexit(void (*)(void*), void*, void*) {
+    return 0;
 }

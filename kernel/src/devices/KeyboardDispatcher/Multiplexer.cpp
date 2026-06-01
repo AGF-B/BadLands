@@ -28,6 +28,8 @@
 
 #include <interrupts/Panic.hpp>
 
+#include <kern/memory.hpp>
+
 #include <mm/Heap.hpp>
 #include <mm/Utils.hpp>
 
@@ -109,16 +111,18 @@ namespace {
 			return FS::Status::UNSUPPORTED;
 		}
 
-		virtual void Destroy(bool deleted) final {
-			if (deleted) {
-				Heap::Free(buffer);
-			}
+		virtual void Unregister() final {
+			// Signals the device has been removed from the filesystem
+		}
+
+		~GenericKeyboardBuffer() {
+			Heap::Free(buffer);
 		}
 	};
 }
 
 namespace Devices::KeyboardDispatcher {
-	FS::IFNode* Initialize(FS::IFNode* deviceInterface) {
+	kern::shared_ptr<FS::IFNode> Initialize(const kern::shared_ptr<FS::IFNode>& deviceInterface) {
 		Log::putsSafe("[GENKBD] Initializing generic keyboard multiplexer...\n\r");
 
 		static constexpr size_t bufferSize = 0x800 * sizeof(BasicKeyPacket);
@@ -131,18 +135,21 @@ namespace Devices::KeyboardDispatcher {
 			Panic::PanicShutdown("(GENKBD) COULD NOT ALLOCATE A SUITABLE BUFFER FOR THE KEYBOARD MULTIPLEXER\n\r");
 		}
 
-		void* mem = Heap::Allocate(sizeof(MultiplexerInterface));
+		kern::shared_ptr<MultiplexerInterface> multiplexer = kern::make_shared<MultiplexerInterface>(
+			static_cast<uint8_t*>(buffer)
+		);
 
-		if (mem == nullptr) {
+		if (!multiplexer) {
 			Panic::PanicShutdown("(GENKBD) COULD NOT ALLOCATE MEMMORY TO CREATE THE KEYBOARD MULTIPLEXER INTERFACE\n\r");
 		}
-
-		MultiplexerInterface* multiplexer = new (mem) MultiplexerInterface(static_cast<uint8_t*>(buffer));
 
 		static constexpr const char nameReference[] = "keyboard";
 		static constexpr FS::DirectoryEntry multiplexerEntry = { .NameLength = sizeof(nameReference) - 1, .Name = nameReference };
 
-		auto status = deviceInterface->AddNode(multiplexerEntry, multiplexer);
+		auto status = deviceInterface->AddNode(
+			multiplexerEntry,
+			kern::static_pointer_cast<FS::IFNode>(multiplexer)
+		);
 
 		if (status != FS::Status::SUCCESS) {
 			Panic::PanicShutdown("(GENKBD) COULD NOT ADD KEYBOARD MULTIPLEXER TO VFS\n\r");
@@ -150,6 +157,6 @@ namespace Devices::KeyboardDispatcher {
 
 		Log::putsSafe("[GENKBD] Generic keyboard multiplexer created\n\r");
 
-		return multiplexer;
+		return kern::static_pointer_cast<FS::IFNode>(multiplexer);
 	}
 }

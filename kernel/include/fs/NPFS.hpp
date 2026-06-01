@@ -22,28 +22,32 @@
 #include <fs/IFNode.hpp>
 #include <fs/Status.hpp>
 
+#include <kern/memory.hpp>
+
 class NPFS : public FS::Owner {
 protected:
     class Directory final : public FS::Directory {
     public:
         explicit Directory(FS::Owner* owner);
 
-        FS::Response<IFNode*>   Find(const FS::DirectoryEntry& fileref) final;
+        FS::Response<kern::shared_ptr<FS::IFNode>>  Find(const FS::DirectoryEntry& fileref) final;
         FS::Status              Create(const FS::DirectoryEntry& fileref, FS::FileType type) final;
-        FS::Status              AddNode(const FS::DirectoryEntry& fileref, FS::IFNode* node) final;
+        FS::Status              AddNode(const FS::DirectoryEntry& fileref, const kern::shared_ptr<FS::IFNode>& node) final;
         FS::Status              Remove(const FS::DirectoryEntry& fileref) final;
         FS::Response<size_t>    List(FS::DirectoryEntry* list, size_t length, size_t from = 0) final;
 
         FS::Status              Query(const FS::QueryInfo& info) final;
 
         static Success          Construct(Directory* directory);
-        void                    Destroy(bool deleted) final;
+        void                    Unregister() final;
+
+        ~Directory();
 
     private:
         struct DirectoryEntry;
 
         FS::Response<DirectoryEntry*>   FindEntry(const FS::DirectoryEntry& fileref);
-        FS::Status                      CreateEntry(const DirectoryEntry* entry);
+        FS::Status                      CreateEntry(const DirectoryEntry& entry);
 
         void* container;
         Utils::Lock mut;
@@ -59,14 +63,16 @@ protected:
         FS::Status           Query(const FS::QueryInfo& info) final;
 
         static Success      Construct(File* file);
-        void                Destroy(bool deleted) final;
+        void                Unregister() final;
+
+        ~File();
     
     private:
         void* container;
         Utils::Lock mut;
     };
 
-    Directory root;
+    kern::shared_ptr<Directory> root;
 
     NPFS();
 

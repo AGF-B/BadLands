@@ -21,18 +21,20 @@
 #include <devices/USB/xHCI/Device.hpp>
 #include <devices/USB/xHCI/TRB.hpp>
 
+#include <kern/memory.hpp>
+
 namespace Devices {
     namespace USB {
         class Driver {
         private:
-            const xHCI::Device& device;
+            kern::shared_ptr<xHCI::Device> device;
 
             inline Success SetBusy() {
-                return device.SetBusy();
+                return device->SetBusy();
             }
 
             inline void ReleaseBusy() {
-                device.ReleaseBusy();
+                device->ReleaseBusy();
             }
 
         protected:
@@ -63,7 +65,7 @@ namespace Devices {
             };
 
         public:
-            Driver(const xHCI::Device& device);
+            Driver(const kern::shared_ptr<xHCI::Device>& device);
 
             virtual const xHCI::TRB* GetAwaitingTRB() const = 0;
             virtual void HandleEvent(const xHCI::TransferEventTRB& trb) = 0;

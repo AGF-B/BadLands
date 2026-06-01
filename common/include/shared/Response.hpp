@@ -41,8 +41,8 @@ private:
 template<typename T>
 class Optional {
 public:
-    explicit inline Optional() : hasValue{false} {}
-    explicit inline Optional(T value) : hasValue{true}, value{value} {}
+    inline Optional() : hasValue{false} {}
+    inline Optional(T value) : hasValue{true}, value{value} {}
 
     inline bool HasValue() const {
         return hasValue;

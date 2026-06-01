@@ -16,11 +16,13 @@
 
 #include <fs/VFS.hpp>
 
+#include <kern/memory.hpp>
+
 namespace Kernel {
     struct KernelExports {
         VFS* vfs;
-        FS::IFNode* deviceInterface;
-        FS::IFNode* keyboardMultiplexerInterface;
+        kern::shared_ptr<FS::IFNode> deviceInterface;
+        kern::shared_ptr<FS::IFNode> keyboardMultiplexerInterface;
     };
 
     extern KernelExports Exports;

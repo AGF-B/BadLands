@@ -21,6 +21,8 @@
 
 #include <fs/Status.hpp>
 
+#include <kern/memory.hpp>
+
 namespace FS {
     static inline constexpr size_t MAX_FILE_PATH = 4096;
 
@@ -42,25 +44,21 @@ namespace FS {
         DIRECTORY
     };
 
-    class IFNode;
-
     class Owner {};
 
     class IFNode {
     public:
         explicit IFNode(Owner* owner);
 
-        virtual FS::Status  Open() final;
-        virtual void        Close() final;
-        virtual size_t      GetOpenReferences() final;
-
         virtual void    MarkForRemoval() final;
-        virtual bool    ShouldBeRemoved() final;
+        virtual bool    ShouldBeRemoved() const final;
+        
+        virtual Status  CanBeOpened() const final;
 
 
-        virtual Response<IFNode*>   Find(const DirectoryEntry& fileref) = 0;
+        virtual Response<kern::shared_ptr<IFNode>> Find(const DirectoryEntry& fileref) = 0;
         virtual Status              Create(const DirectoryEntry& fileref, FileType type) = 0;
-        virtual Status              AddNode(const DirectoryEntry& fileref, IFNode* node) = 0;
+        virtual Status              AddNode(const DirectoryEntry& fileref, const kern::shared_ptr<IFNode>& node) = 0;
         virtual Status              Remove(const DirectoryEntry& fileref) = 0;
         virtual Response<size_t>    List(DirectoryEntry* list, size_t length, size_t from = 0) = 0;
         virtual bool                IsDirectory() const = 0;
@@ -70,13 +68,15 @@ namespace FS {
 
         virtual Status              Query(const QueryInfo& info) = 0;
 
+        virtual void Unregister() = 0;
+        
+        ~IFNode() = default;
+
     protected:
-        virtual void Destroy(bool deleted) = 0;
 
         Owner* const owner;
 
     private:
-        Utils::SimpleAtomic<size_t> openReferences{0};
         bool removed{false};
     };
 
@@ -88,17 +88,21 @@ namespace FS {
 
         virtual Response<size_t>    Read(size_t offset, size_t count, uint8_t* buffer) final;
         virtual Response<size_t>    Write(size_t offset, size_t count, const uint8_t* buffer) final;
+
+        ~Directory() = default;
     };
 
     class File : public IFNode {
     public:
         explicit File(Owner* owner);
 
-        virtual Response<IFNode*>   Find(const DirectoryEntry& fileref) final;
+        virtual Response<kern::shared_ptr<IFNode>> Find(const DirectoryEntry& fileref) final;
         virtual Status			    Create(const DirectoryEntry& fileref, FileType type) final;
-        virtual Status			    AddNode(const DirectoryEntry& fileref, IFNode* node) final;
+        virtual Status			    AddNode(const DirectoryEntry& fileref, const kern::shared_ptr<IFNode>& node) final;
         virtual Status			    Remove(const DirectoryEntry& fileref) final;
         virtual Response<size_t>	List(DirectoryEntry* list, size_t length, size_t from = 0) final;
         virtual bool                IsDirectory() const final;
+
+        ~File() = default;
     };
 }

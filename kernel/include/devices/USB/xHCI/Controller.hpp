@@ -23,6 +23,7 @@
 #include <devices/USB/xHCI/Device.hpp>
 #include <devices/USB/xHCI/TRB.hpp>
 #include <interrupts/InterruptProvider.hpp>
+#include <kern/memory.hpp>
 #include <pci/Interface.hpp>
 
 namespace Devices {
@@ -143,7 +144,7 @@ namespace Devices {
                 uint8_t max_slots_enabled = 0;
 
                 DCBAA* dcbaa = nullptr;
-                Device** devices = nullptr;
+                kern::unique_ptr<kern::shared_ptr<Device>[]> devices = {};
 
                 Utils::Lock command_lock;
                 TRB* command_ring = nullptr;

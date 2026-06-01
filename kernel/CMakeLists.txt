@@ -86,6 +86,7 @@ add_executable(KERNEL_IMG
     "src/screen/Framebuffer.cpp"
     "src/screen/Log.cpp"
     "src/screen/ThreadSafe.cpp"
+    "src/cxxabi.cpp"
     "src/entry.cpp"
 )
 

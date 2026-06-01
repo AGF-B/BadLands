@@ -26,6 +26,10 @@
 #include <devices/USB/MassStorage/Driver.hpp>
 #include <devices/USB/xHCI/Device.hpp>
 
+#include <kern/memory.hpp>
+
+#include <mm/MemoryProvider.hpp>
+
 namespace Devices {
     namespace USB {
         namespace MassStorage {
@@ -34,7 +38,7 @@ namespace Devices {
                 private:
                     struct StorageInfo {
                         size_t max_lun = 0;
-                        Storage::Driver** drivers = nullptr;
+                        kern::unique_ptr<kern::shared_ptr<Storage::Driver>[]> drivers = {};
                     };
 
                     struct EndpointsInfo {
@@ -93,7 +97,7 @@ namespace Devices {
                     StorageInfo storage_info;
                     EndpointsInfo endpoints_info;
                     uint32_t current_tag = 0;
-                    void* const io_buffer;
+                    void* io_buffer;
                     void* const phys_io_buffer;
                     const xHCI::TRB* volatile last_sent_trb = nullptr;
                     xHCI::TransferEventTRB last_transfer_result{};
@@ -101,8 +105,8 @@ namespace Devices {
                     Utils::Lock driver_lock;
 
                     Driver(
-                        xHCI::Device& device,
-                        const StorageInfo& storage_info,
+                        const kern::shared_ptr<xHCI::Device>& device,
+                        StorageInfo&& storage_info,
                         const EndpointsInfo& endpoints_info,
                         const IOBufferInfo& io_buffer_info
                     );
@@ -110,8 +114,15 @@ namespace Devices {
                     Success ResetRecovery();
                     Success SendNormalBuffer(uint32_t length, uint8_t endpoint, bool is_input);
 
+                    template<class T, MemoryProvider Provider, class... Args>
+                    friend constexpr kern::shared_ptr<T, Provider> kern::make_shared(Args&&... args);
+
                 public:
-                    static Optional<USB::Driver*> Create(xHCI::Device& device, uint8_t configurationValue, const xHCI::Device::FunctionDescriptor* function);
+                    static kern::shared_ptr<USB::Driver> Create(
+                        const kern::shared_ptr<xHCI::Device>& device,
+                        uint8_t configurationValue,
+                        const xHCI::Device::FunctionDescriptor* function
+                    );
 
                     virtual const xHCI::TRB* GetAwaitingTRB() const final;
                     virtual void HandleEvent(const xHCI::TransferEventTRB& trb) final;

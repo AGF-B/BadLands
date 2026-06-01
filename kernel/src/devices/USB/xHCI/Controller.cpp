@@ -156,7 +156,7 @@ namespace Devices::USB::xHCI {
                     
                     const auto& device = devices[slot_id - 1];
 
-                    if (device != nullptr) {
+                    if (device) {
                         device->SignalTransferComplete(transfer_event);
                     }
                     
@@ -287,16 +287,16 @@ namespace Devices::USB::xHCI {
 
         const size_t dcbaa_pages = GetDCBAAPPages();
         
-        devices = static_cast<Device**>(Heap::Allocate(static_cast<size_t>(max_slots_enabled) * sizeof(Device*)));
+        devices = kern::make_unique<kern::shared_ptr<Device>[]>(max_slots_enabled);
 
-        if (devices == nullptr) {
+        if (!devices) {
             return false;
         }
 
         dcbaa = reinterpret_cast<DCBAA*>(VirtualMemory::AllocateDMA(dcbaa_pages));
 
         if (dcbaa == nullptr) {
-            Heap::Free(devices);
+            devices = {};
             return false;
         }
 
@@ -316,8 +316,15 @@ namespace Devices::USB::xHCI {
         if (dcbaa != nullptr) {
             VirtualMemory::FreeDMA(dcbaa, GetDCBAAPPages());
             dcbaa = nullptr;
-            Heap::Free(devices);
-            devices = nullptr;
+
+            for (uint8_t i = 0; i < max_slots_enabled; ++i) {
+                if (devices[i]) {
+                    devices[i]->Destroy();
+                    devices[i] = {};
+                }
+            }
+
+            devices = {};
         }
     }
 
@@ -650,9 +657,9 @@ namespace Devices::USB::xHCI {
                         uint8_t& slot = ports[i].slot;
 
                         if (slot != 0) {
-                            if (devices[slot - 1] != nullptr) {
-                                auto* const device = devices[slot - 1];
-                                devices[slot - 1] = nullptr;
+                            if (devices[slot - 1]) {
+                                auto device = devices[slot - 1];
+                                devices[slot - 1] = {};
                                 device->Destroy();
                             }
 
@@ -722,9 +729,16 @@ namespace Devices::USB::xHCI {
                             Log::printfSafe("[xHCI] Port 0x%0.2hhx mapped to slot %hhu\n\r", i, ports[i].slot);
                         }
 
-                        auto* const raw_device = Heap::Allocate(sizeof(Device));
+                        kern::shared_ptr<Device> device = kern::make_shared<Device>(*this, DeviceInformation{
+                            .route_string = 0,
+                            .parent_port = static_cast<uint8_t>(i + 1),
+                            .root_hub_port = static_cast<uint8_t>(i + 1),
+                            .slot_id = ports[i].slot,
+                            .port_speed = PortSpeed::FromSpeedID(speed_id),
+                            .depth = 0
+                        });
 
-                        if (raw_device == nullptr) {
+                        if (!device) {
                             if constexpr (Debug::DEBUG_USB_SOFT_ERRORS) {
                                 Log::printfSafe("[xHCI] Could not allocate memory for device on port 0x%0.2hhx\n\r", i);
                             }
@@ -734,25 +748,15 @@ namespace Devices::USB::xHCI {
                             continue;
                         }
 
-                        auto device = new (raw_device) Device(*this, DeviceInformation{
-                            .route_string = 0,
-                            .parent_port = static_cast<uint8_t>(i + 1),
-                            .root_hub_port = static_cast<uint8_t>(i + 1),
-                            .slot_id = ports[i].slot,
-                            .port_speed = PortSpeed::FromSpeedID(speed_id),
-                            .depth = 0
-                        });
-
                         auto& pdevice = devices[slot_id - 1];
                         pdevice = device;
 
-                        if (!device->Initialize().IsSuccess()) {
+                        if (!device->Initialize(device).IsSuccess()) {
                             if constexpr (Debug::DEBUG_USB_SOFT_ERRORS) {
                                 Log::printfSafe("[xHCI] Failed to initialize device on port 0x%0.2hhx\n\r", i);
                             }
 
-                            Heap::Free(pdevice);
-                            pdevice = nullptr;
+                            pdevice = {};
                             DisableSlot(ports[i].slot);
                             ports[i].slot = 0;
                         }
@@ -762,8 +766,7 @@ namespace Devices::USB::xHCI {
                             }
                             
                             pdevice->Destroy();
-                            Heap::Free(pdevice);
-                            pdevice = nullptr;
+                            pdevice = {};
                             DisableSlot(ports[i].slot);
                             ports[i].slot = 0;
                         }

@@ -1304,13 +1304,13 @@ namespace Devices::USB::xHCI {
         controller.RingDoorbell(*this, endpointIndex);
     }
 
-    Success Device::AddDriver(Driver* driver) {
+    Success Device::AddDriver(const kern::shared_ptr<USB::Driver>& driver) {
         DriversNode* prev = nullptr;
         DriversNode* node = drivers;
 
         while (node != nullptr) {
             for (size_t i = 0; i < DriversNode::MAX_DRIVERS; ++i) {
-                if (node->drivers[i] == nullptr) {
+                if (!node->drivers[i]) {
                     node->drivers[i] = driver;
                     return Success();
                 }
@@ -1345,13 +1345,13 @@ namespace Devices::USB::xHCI {
 
         while (node != nullptr) {
             for (size_t i = 0; i < DriversNode::MAX_DRIVERS; ++i) {
-                Driver* driver = node->drivers[i];
+                Driver* driver = node->drivers[i].get();
 
                 if (driver != nullptr) {
                     const auto address_wrapper = Paging::GetPhysicalAddress(driver->GetAwaitingTRB());
 
                     if (address_wrapper.HasValue() && address_wrapper.GetValue() == trb.GetPointer()) {
-                        return Optional<Driver*>(driver);
+                        return {driver};
                     }
                 }
             }
@@ -1359,7 +1359,7 @@ namespace Devices::USB::xHCI {
             node = node->next;
         }
 
-        return Optional<Driver*>();
+        return {};
     }
 
     void Device::ReleaseDrivers() {
@@ -1367,14 +1367,15 @@ namespace Devices::USB::xHCI {
 
         while (node != nullptr) {
             for (size_t i = 0; i < DriversNode::MAX_DRIVERS; ++i) {
-                if (node->drivers[i] != nullptr) {
+                if (node->drivers[i]) {
                     node->drivers[i]->Release();
-                    node->drivers[i] = nullptr;
+                    node->drivers[i] = {};
                 }
             }
 
             DriversNode* next = node->next;
             node->next = nullptr;
+            node->~DriversNode();
             Heap::Free(node);
             node = next;
         }
@@ -1393,7 +1394,7 @@ namespace Devices::USB::xHCI {
         return context_wrapper->GetOutputDeviceContextAddress();
     }
 
-    Success Device::Initialize() {
+    Success Device::Initialize(const kern::shared_ptr<Device>& self) {
         if (!SetBusy().IsSuccess()) {
             if constexpr (Debug::DEBUG_USB_ERRORS) {
                 Log::printfSafe("[USB] Failed to set device %u as busy\r\n", information.slot_id);
@@ -1551,21 +1552,19 @@ namespace Devices::USB::xHCI {
                             Log::printfSafe("[USB] Found HID function in configuration %u\r\n", i);
                         }
 
-                        auto drv = HID::Driver::Create(*this, configurations[i].configurationValue, function);
+                        auto drv = HID::Driver::Create(self, configurations[i].configurationValue, function);
 
-                        if (drv.HasValue()) {
+                        if (drv) {
                             if constexpr (Debug::DEBUG_USB_INFO) {
                                 Log::printfSafe("[USB] HID device created for device %u\r\n", information.slot_id);
                             }
 
-                            auto* const pdrv = drv.GetValue();
-
-                            if (!AddDriver(pdrv).IsSuccess()) {
+                            if (!AddDriver(drv).IsSuccess()) {
                                 if constexpr (Debug::DEBUG_USB_SOFT_ERRORS) {
                                     Log::printfSafe("[USB] Failed to add HID driver for device %u\r\n", information.slot_id);
                                 }
 
-                                pdrv->Release();
+                                drv->Release();
                             }
 
                             drivers_initialized = true;
@@ -1581,21 +1580,19 @@ namespace Devices::USB::xHCI {
                             Log::printfSafe("[USB] Found Mass Storage function in configuration %u\n\r", i);
                         }
 
-                        auto drv = MassStorage::Driver::Create(*this, configurations[i].configurationValue, function);
+                        auto drv = MassStorage::Driver::Create(self, configurations[i].configurationValue, function);
 
-                        if (drv.HasValue()) {
+                        if (drv) {
                             if constexpr (Debug::DEBUG_USB_INFO) {
                                 Log::printfSafe("[USB] Mass Storage device created for device %u\r\n", information.slot_id);
                             }
 
-                            auto* const pdrv = drv.GetValue();
-
-                            if (!AddDriver(pdrv).IsSuccess()) {
+                            if (!AddDriver(drv).IsSuccess()) {
                                 if constexpr (Debug::DEBUG_USB_SOFT_ERRORS) {
                                     Log::printfSafe("[USB] Failed to add Mass Storage driver for device %u\r\n", information.slot_id);
                                 }
 
-                                pdrv->Release();
+                                drv->Release();
                             }
 
                             drivers_initialized = true;
@@ -1698,7 +1695,7 @@ namespace Devices::USB::xHCI {
 
         while (node != nullptr) {
             for (size_t i = 0; i < DriversNode::MAX_DRIVERS; ++i) {
-                if (node->drivers[i] != nullptr) {
+                if (node->drivers[i]) {
                     if (!node->drivers[i]->PostInitialization().IsSuccess()) {
                         ReleaseBusy();
                         return Failure();

@@ -17,7 +17,6 @@
 #include <cstddef>
 #include <cstdint>
 
-#include <shared/Lock.hpp>
 #include <shared/Response.hpp>
 
 #include <devices/Block/Interface.hpp>
@@ -25,7 +24,6 @@
 #include <fs/IFNode.hpp>
 
 #include <kern/memory.hpp>
-
 
 /// TODO: Fix race conditions on destruction of partitions and devices.
 
@@ -39,7 +37,7 @@ namespace Devices {
 
         class Partition : public FS::File {
         private:
-            Interface* const interface;
+            kern::shared_ptr<Interface> interface;
 
             const size_t deviceId;
             const size_t partitionId;
@@ -49,13 +47,6 @@ namespace Devices {
 
             const GUID typeGUID;
             const GUID uniqueGUID;
-
-            const bool valid;
-
-            Utils::Lock state_lock{};
-            bool destroyed{false};
-
-            void ReleaseResources();
 
         public:
             class Queries {
@@ -90,8 +81,8 @@ namespace Devices {
                 }
             };
 
-            Partition(
-                Interface* interface,
+            inline Partition(
+                const kern::shared_ptr<Interface>& interface,
                 size_t deviceId,
                 size_t partitionId,
                 uint64_t firstBlock,
@@ -101,55 +92,47 @@ namespace Devices {
             )
                 : FS::File{nullptr}, interface{interface}, deviceId{deviceId},
                 partitionId{partitionId}, firstBlock{firstBlock}, blocksCount{blocksCount},
-                typeGUID{typeGUID}, uniqueGUID{uniqueGUID}, valid{true} {}
+                typeGUID{typeGUID}, uniqueGUID{uniqueGUID} {}
 
-            Partition()
-                : FS::File{nullptr}, interface{nullptr}, deviceId{0},
+            inline Partition()
+                : FS::File{nullptr}, interface{}, deviceId{0},
                 partitionId{0}, firstBlock{0}, blocksCount{0},
-                typeGUID{0}, uniqueGUID{0}, valid{false} {}
+                typeGUID{0}, uniqueGUID{0} {}
 
             inline constexpr size_t GetDeviceId() const { return deviceId; }
             inline constexpr size_t GetPartitionId() const { return partitionId; }
             size_t GetNameLength() const;
             kern::unique_ptr<char[]> GetName() const;
 
-            bool IsValid() const { return valid; }
-
             virtual FS::Response<size_t> Read(size_t offset, size_t count, uint8_t* buffer) final;
             virtual FS::Response<size_t> Write(size_t offset, size_t count, const uint8_t* buffer) final;
 
             virtual FS::Status Query(const FS::QueryInfo& info) final;
 
-            // Called by FS when unregistered
-            virtual void Destroy(bool deleted) final;
-            
-            // Called by block device
-            void DestroyPartition();
+            virtual void Unregister() final;
+
+            void Eject();
+
+            ~Partition() = default;
         };
 
         class Device : public FS::File {
         private:
             static inline size_t nextDeviceId = 0;
 
-            Interface* const interface;
+            kern::shared_ptr<Interface> interface;
             size_t deviceId;
 
-            kern::unique_ptr<Partition[]> partitions{};
+            kern::unique_ptr<kern::shared_ptr<Partition>[]> partitions{};
             size_t partitionsCount{0};
 
             GUID diskGUID;
             bool hasShortGUID{false};
 
-            Utils::Lock state_lock{};
-            bool destroyed{false};
-            bool partitions_removed{false};
-
             inline constexpr void SetGUID(const GUID& diskGUID, bool isShortGUID) {
                 this->diskGUID = diskGUID;
                 hasShortGUID = isShortGUID;
             }
-
-            void ReleaseResources(bool removed_partitions);
 
         public:
             class Queries {
@@ -184,9 +167,10 @@ namespace Devices {
                 }
             };
 
-            Device(Interface* interface, size_t deviceId) : FS::File{nullptr}, interface{interface}, deviceId{deviceId} {}
+            Device(const kern::shared_ptr<Interface>& interface, size_t deviceId)
+                : FS::File{nullptr}, interface{interface}, deviceId{deviceId} {}
 
-            static Optional<Device*> AddDevice(Interface* interface);
+            static kern::shared_ptr<Device> AddDevice(const kern::shared_ptr<Interface>& interface);
 
             inline constexpr size_t GetDeviceId() const { return deviceId; }
             size_t GetNameLength() const;
@@ -197,11 +181,11 @@ namespace Devices {
 
             virtual FS::Status Query(const FS::QueryInfo& info) final;
 
-            // Called by FS when unregistered
-            virtual void Destroy(bool deleted) final;
+            virtual void Unregister() final;
 
-            // Called by the device driver
-            void DestroyDevice();
+            void Eject();
+
+            ~Device() = default;
         };
     }
 }

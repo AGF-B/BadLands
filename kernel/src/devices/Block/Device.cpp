@@ -445,80 +445,68 @@ namespace Devices::Block {
         }
     }
 
-    void Partition::ReleaseResources() {
-        {
-            Utils::LockGuard _{state_lock};
+    void Partition::Unregister() {
+        // Signals the partition has been removed from the filesystem
+        // The partition will be destroyed once all handles to it are closed
+        // Partitions are already removed from filesystem on device unregistration
+        // Therefore, this method is a no-op
+    }
 
-            if (destroyed) {
-                return;
+    void Partition::Eject() {
+        // Removes the partition from the filesystem if it is not already removed
+
+        if (!ShouldBeRemoved()) {
+            const size_t name_length = GetNameLength();
+            const auto name = GetName();
+
+            if (name) {
+                Kernel::Exports.deviceInterface->Remove({
+                    .NameLength = name_length,
+                    .Name = name.get()
+                });
             }
-            else {
-                destroyed = true;
-            }
-        }
-
-        size_t name_length = GetNameLength();
-        auto name = GetName();
-
-        if (name) {
-            Kernel::Exports.deviceInterface->Remove({
-                .NameLength = name_length,
-                .Name = name.get()
-            });
         }
     }
 
-    void Partition::Destroy(bool deleted) {
-        if (deleted) {
-            ReleaseResources();
-        }
-    }
-
-    void Partition::DestroyPartition() {
-        ReleaseResources();
-    }
-
-    Optional<Device*> Device::AddDevice(Interface* interface) {
-        if (interface == nullptr) {
-            return Optional<Device*>();
+    kern::shared_ptr<Device> Device::AddDevice(const kern::shared_ptr<Interface>& interface) {
+        if (!interface) {
+            return {};
         }
 
         auto boot_sector = kern::make_unique<uint8_t[]>(interface->GetBlockSize());
 
         if (!boot_sector) {
-            return Optional<Device*>();
+            return {};
         }
 
         if (!interface->ReadBlocks(0, 1, boot_sector.get()).IsSuccess()) {
-            return Optional<Device*>();
+            return {};
         }
 
         auto mbr = MBR::FromBytes(boot_sector.get());
 
-        kern::unique_ptr<Device> device_wrapper = kern::make_unique<Device>(interface, nextDeviceId++);
+        kern::shared_ptr<Device> device = kern::make_shared<Device>(interface, nextDeviceId++);
 
-        if (!device_wrapper) {
+        if (!device) {
             Log::putsSafe("[DEV] Failed to allocate block device");
-            return Optional<Device*>();
+            return {};
         }
 
-        const size_t name_length = device_wrapper->GetNameLength();
-        const auto device_name = device_wrapper->GetName();
+        const size_t name_length = device->GetNameLength();
+        const auto device_name = device->GetName();
         
         if (!device_name) {
             Log::putsSafe("[DEV] Failed to allocate block device name");
-            return Optional<Device*>();
+            return {};
         }
 
         if (Kernel::Exports.deviceInterface->AddNode({
             .NameLength = name_length,
             .Name = device_name.get()
-        }, device_wrapper.get()) != FS::Status::SUCCESS) {
+        }, kern::static_pointer_cast<FS::IFNode>(device)) != FS::Status::SUCCESS) {
             Log::putsSafe("[DEV] Failed to add block device to filesystem");
-            return Optional<Device*>();
+            return {};
         }
-
-        Device* device = device_wrapper.release();
 
         // from now on, an error is not fatal, it just prevents partitions from being loaded.
 
@@ -526,28 +514,28 @@ namespace Devices::Block {
             auto gpt_sector = kern::make_unique<uint8_t[]>(interface->GetBlockSize());
             
             if (!gpt_sector) {
-                return Optional(device);
+                return device;
             }
 
             static constexpr size_t PRIMARY_GPT_LBA = 1;
 
             if (!interface->ReadBlocks(PRIMARY_GPT_LBA, 1, gpt_sector.get()).IsSuccess()) {
-                return Optional(device);
+                return device;
             }
 
             auto gpt = reinterpret_cast<const GPT*>(gpt_sector.get());
 
-            if (!gpt->IsValid(PRIMARY_GPT_LBA, interface->GetBlockSize(), interface)) {
-                return Optional(device);
+            if (!gpt->IsValid(PRIMARY_GPT_LBA, interface->GetBlockSize(), interface.get())) {
+                return device;
             }
 
             device->SetGUID(gpt->disk_guid, false);
 
-            auto partition_fetcher = GPTPartitionFetcher(gpt, interface->GetBlockSize(), interface, 32);
+            auto partition_fetcher = GPTPartitionFetcher(gpt, interface->GetBlockSize(), interface.get(), 32);
             
             if (!partition_fetcher.Initialize().IsSuccess()) {
                 Log::putsSafe("Failed to initialize GPT partition fetcher");
-                return Optional(device);
+                return device;
             }
 
             size_t partition_count = 0;
@@ -557,7 +545,7 @@ namespace Devices::Block {
 
                 if (!entryOpt.HasValue()) {
                     Log::putsSafe("Failed to fetch GPT partition entry");
-                    return Optional(device);
+                    return device;
                 }
 
                 const auto& entry = entryOpt.GetValue();
@@ -578,10 +566,10 @@ namespace Devices::Block {
 
             if (!partition_fetcher.Reset().IsSuccess()) {
                 Log::putsSafe("Failed to reset GPT partition fetcher");
-                return Optional(device);
+                return device;
             }
 
-            device->partitions = kern::make_unique<Partition[]>(partition_count);
+            device->partitions = kern::make_unique<kern::shared_ptr<Partition>[]>(partition_count);
             device->partitionsCount = partition_count;
 
             size_t current_partition = 0;
@@ -591,7 +579,7 @@ namespace Devices::Block {
 
                 if (!entryOpt.HasValue()) {
                     Log::putsSafe("Failed to fetch GPT partition entry");
-                    return Optional(device);
+                    return device;
                 }
 
                 const auto& entry = entryOpt.GetValue();
@@ -609,9 +597,9 @@ namespace Devices::Block {
                 const uint64_t partition_first_block = entry.starting_lba;
                 const uint64_t partition_block_count = entry.ending_lba - entry.starting_lba + 1;
 
-                auto* const partition = &device->partitions[current_partition];
+                auto& partition = device->partitions[current_partition];
 
-                new (partition) Partition(
+                partition = kern::make_shared<Partition>(
                     interface,
                     device->GetDeviceId(),
                     current_partition++,
@@ -621,20 +609,23 @@ namespace Devices::Block {
                     entry.unique_partition_guid
                 );
 
+                if (!partition) {
+                    Log::putsSafe("[DEV] Failed to allocate block device partition");
+                    continue;
+                }
+
                 const size_t partition_name_length = partition->GetNameLength();
                 const auto partition_name = partition->GetName();
 
                 if (!partition_name) {
                     Log::putsSafe("[DEV] Failed to allocate block device partition name");
-                    new (partition) Partition();
                 }
                 else {
                     if (Kernel::Exports.deviceInterface->AddNode({
                         .NameLength = partition_name_length,
                         .Name = partition_name.get()
-                    }, partition) != FS::Status::SUCCESS) {
+                    }, static_pointer_cast<FS::IFNode>(partition)) != FS::Status::SUCCESS) {
                         Log::putsSafe("[DEV] Failed to add block device partition to filesystem");
-                        new (partition) Partition();
                     }
                 }
             }
@@ -643,7 +634,7 @@ namespace Devices::Block {
             /// TODO: handle MBR partitions
         }
 
-        return Optional(device);
+        return device;
     }
 
     size_t Device::GetNameLength() const {
@@ -746,40 +737,36 @@ namespace Devices::Block {
         }
     }
 
-    void Device::ReleaseResources(bool remove_partitions) {
-        state_lock.lock();
+    void Device::Unregister() {
+        // Signals the device has been removed from the filesystem
+        // Two cases:
+        // Interface already ejected: device will be destroyed after this call and once all handles to it are closed
+        // Interface not ejected yet: device will be destroyed once the interface is ejected and all handles to the device are closed
+        // Partitions are not removed from filesystem on device unregistration, rather on interface ejection
+        // Therefore, this method is a no-op
+    }
 
-        if (destroyed) {
-            if (!partitions_removed) {
-                for (size_t i = 0; i < partitionsCount; ++i) {
-                    if (partitions[i].IsValid()) {
-                        partitions[i].DestroyPartition();
-                    }
-                }
+    void Device::Eject() {
+        // Signals the device interface has been ejected
+        // Two cases:
+        // Device already unregistered: device will be destroyed after this call and once all handles to it are closed
+        // Device not unregistered yet: device will be destroyed once it is unregistered and all handles to the device are closed
+        // Partitions are removed from filesystem on interface ejection
+        // Therefore they are removed in this method
+
+        // eject partitions
+
+        for (size_t i = 0; i < partitionsCount; ++i) {
+            if (partitions[i]) {
+                partitions[i]->Eject();
             }
- 
-            partitions.~unique_ptr();   // deallocate partitions array
-            Heap::Free(this);           // deallocate device
-
-            // state_lock not unlocked as the device memory was just freed
         }
-        else {
-            destroyed = true;
 
-            if (remove_partitions) {
-                for (size_t i = 0; i < partitionsCount; ++i) {
-                    if (partitions[i].IsValid()) {
-                        partitions[i].DestroyPartition();
-                    }
-                }
+        // self-eject
 
-                partitions_removed = true;
-            }
-
+        if (!ShouldBeRemoved()) {
             const size_t name_length = GetNameLength();
             const auto name = GetName();
-
-            state_lock.unlock();
 
             if (name) {
                 Kernel::Exports.deviceInterface->Remove({
@@ -788,15 +775,5 @@ namespace Devices::Block {
                 });
             }
         }
-    }
-
-    void Device::Destroy(bool deleted) {
-        if (deleted) {
-            ReleaseResources(false);
-        }
-    }
-
-    void Device::DestroyDevice() {
-        ReleaseResources(true);
     }
 }
