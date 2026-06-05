@@ -57,6 +57,7 @@ add_executable(KERNEL_IMG
     "src/devices/PS2/Keyboard.cpp"
     "src/devices/PS2/Keypoints.cpp"
     "src/devices/Storage/SCSI/Driver.cpp"
+    "src/fs/Bridge.cpp"
     "src/fs/IFNode.cpp"
     "src/fs/NPFS.cpp"
     "src/fs/Root.cpp"
