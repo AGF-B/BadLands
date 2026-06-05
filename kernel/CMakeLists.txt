@@ -58,6 +58,7 @@ add_executable(KERNEL_IMG
     "src/devices/PS2/Keypoints.cpp"
     "src/devices/Storage/SCSI/Driver.cpp"
     "src/fs/Bridge.cpp"
+    "src/fs/FileSystem.cpp"
     "src/fs/IFNode.cpp"
     "src/fs/NPFS.cpp"
     "src/fs/Root.cpp"
@@ -195,7 +196,7 @@ target_link_options(KERNEL_IMG PRIVATE
     -nolibc
     -nostdlib
     -flto
-    #-s
+    -s
 )
 
 target_link_options(KERNEL_EXTENSIONS PRIVATE
@@ -204,7 +205,7 @@ target_link_options(KERNEL_EXTENSIONS PRIVATE
     -nolibc
     -nostdlib
     -flto
-    #-s
+    -s
 )
 
 target_compile_features(KERNEL_IMG PRIVATE cxx_std_23)
