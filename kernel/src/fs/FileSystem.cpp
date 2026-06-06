@@ -17,6 +17,6 @@
 
 #include <kern/memory.hpp>
 
-kern::shared_ptr<FileSystem> FileSystem::AutoDetect(const kern::shared_ptr<FS::IFNode>& device) {
+kern::unique_ptr<FileSystem> FileSystem::AutoDetect(const kern::shared_ptr<FS::IFNode>& device) {
     return {};
 }
