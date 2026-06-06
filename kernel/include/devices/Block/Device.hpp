@@ -24,6 +24,7 @@
 #include <fs/IFNode.hpp>
 
 #include <kern/memory.hpp>
+#include <kern/string.hpp>
 
 namespace Devices {
     namespace Block {
@@ -45,6 +46,10 @@ namespace Devices {
 
             const GUID typeGUID;
             const GUID uniqueGUID;
+
+            kern::shared_ptr<IFNode> filesystemBridge{};
+
+            kern::static_string GetFSBridgeName() const;
 
         public:
             class Queries {
@@ -99,8 +104,9 @@ namespace Devices {
 
             inline constexpr size_t GetDeviceId() const { return deviceId; }
             inline constexpr size_t GetPartitionId() const { return partitionId; }
-            size_t GetNameLength() const;
-            kern::unique_ptr<char[]> GetName() const;
+            kern::static_string GetName() const;
+
+            void TryMountFilesystem(const kern::shared_ptr<Partition>& self);
 
             virtual FS::Response<size_t> Read(size_t offset, size_t count, uint8_t* buffer) final;
             virtual FS::Response<size_t> Write(size_t offset, size_t count, const uint8_t* buffer) final;
@@ -171,8 +177,7 @@ namespace Devices {
             static kern::shared_ptr<Device> AddDevice(const kern::shared_ptr<Interface>& interface);
 
             inline constexpr size_t GetDeviceId() const { return deviceId; }
-            size_t GetNameLength() const;
-            kern::unique_ptr<char[]> GetName() const;
+            kern::static_string GetName() const;
 
             virtual FS::Response<size_t> Read(size_t offset, size_t count, uint8_t* buffer) final;
             virtual FS::Response<size_t> Write(size_t offset, size_t count, const uint8_t* buffer) final;

@@ -23,8 +23,12 @@
 
 #include <devices/Block/Device.hpp>
 
+#include <fs/Bridge.hpp>
+#include <fs/FileSystem.hpp>
+
 #include <kern/math.hpp>
 #include <kern/memory.hpp>
+#include <kern/string.hpp>
 
 #include <mm/Heap.hpp>
 #include <mm/Utils.hpp>
@@ -332,20 +336,82 @@ namespace {
             return Optional<GPTPartitionEntry>(*entry);
         }
     };
+
+    constexpr void ByteToHex(uint8_t byte, char& high, char& low) {
+        static constexpr char hex_digits[] = "0123456789ABCDEF";
+
+        high = hex_digits[byte >> 4];
+        low = hex_digits[byte & 0x0F];
+    }
+
+    constexpr char* EmplaceHexByte(uint8_t byte, char* ptr) {
+        ByteToHex(byte, *ptr, *(ptr + 1));
+        return ptr + 2;
+    }
 }
 
 namespace Devices::Block {
-    size_t Partition::GetNameLength() const {
+    kern::static_string Partition::GetFSBridgeName() const {
+        // name is guid of the partition in string form, e.g., "12345678-1234-1234-1234-1234567890AB"
+        const size_t guid_string_length = 36;
+
+        auto name = kern::make_static_string(guid_string_length);
+
+        if (name) {
+            char* ptr = name.get();
+
+            const uint8_t* guid_data = uniqueGUID.data;
+
+            // first 4 bytes in little-endian
+            for (size_t i = 0; i < 4; ++i) {
+                const uint8_t byte = guid_data[3 - i];
+                ptr = EmplaceHexByte(byte, ptr);
+            }
+
+            *ptr++ = '-';
+
+            // next 2 bytes in little-endian
+            for (size_t i = 0; i < 2; ++i) {
+                const uint8_t byte = guid_data[5 - i];
+                ptr = EmplaceHexByte(byte, ptr);
+            }
+
+            *ptr++ = '-';
+
+            // next 2 bytes in little-endian
+            for (size_t i = 0; i < 2; ++i) {
+                const uint8_t byte = guid_data[7 - i];
+                ptr = EmplaceHexByte(byte, ptr);
+            }
+
+            *ptr++ = '-';
+
+            // next 2 bytes in big-endian
+            for (size_t i = 8; i < 10; ++i) {
+                const uint8_t byte = guid_data[i];
+                ptr = EmplaceHexByte(byte, ptr);
+            }
+
+            *ptr++ = '-';
+
+            // last 6 bytes in big-endian
+            for (size_t i = 10; i < 16; ++i) {
+                const uint8_t byte = guid_data[i];
+                ptr = EmplaceHexByte(byte, ptr);
+            }
+        }
+
+        return name;
+    }
+
+    kern::static_string Partition::GetName() const {
         // name format is "bdev{deviceId}-{partitionId}"
         const size_t root_size = 4;
         const size_t device_id_size = kern::log(deviceId, 10) + 1;
         const size_t partition_id_size = kern::log(partitionId, 10) + 1;
-        return root_size + device_id_size + 1 + partition_id_size;
-    }
+        const size_t name_length = root_size + device_id_size + 1 + partition_id_size;
 
-    kern::unique_ptr<char[]> Partition::GetName() const {
-        const size_t name_length = GetNameLength();
-        auto name = kern::make_unique<char[]>(name_length);
+        auto name = kern::make_static_string(name_length);
 
         if (name) {
             char* ptr = name.get();
@@ -371,6 +437,45 @@ namespace Devices::Block {
         }
 
         return name;
+    }
+
+    void Partition::TryMountFilesystem(const kern::shared_ptr<Partition>& self) {
+        // try to mount a filesystem on the partition, if it fails, it's not a problem, the partition can still be used as a raw block device
+
+        auto filesystem = FileSystem::AutoDetect(kern::static_pointer_cast<FS::IFNode>(self));
+
+        if (filesystem) {
+            const auto bridge = kern::make_shared<FS::Bridge>(owner, std::move(filesystem));
+
+            if (bridge) {
+                const auto bridge_name = GetFSBridgeName();
+
+                if (bridge_name) {
+                    const FS::DirectoryEntry entry{
+                        .NameLength = bridge_name.size(),
+                        .Name = bridge_name.get()
+                    };
+
+                    const auto generic_bridge = kern::static_pointer_cast<FS::IFNode>(bridge);
+
+                    if (Kernel::Exports.partitionInterface->AddNode(entry, generic_bridge) == FS::Status::SUCCESS) {
+                        filesystemBridge = kern::static_pointer_cast<FS::IFNode>(bridge);
+                    }
+                    else {
+                        Log::putsSafe("[DEV] Failed to add filesystem bridge to filesystem");
+                    }
+                }
+                else {
+                    Log::putsSafe("[DEV] Failed to allocate filesystem bridge name");
+                }
+            }
+            else {
+                Log::putsSafe("[DEV] Failed to allocate filesystem bridge");
+            }
+        }
+        else {
+            Log::putsSafe("[DEV] No filesystem detected on partition");
+        }
     }
     
     FS::Response<size_t> Partition::Read(size_t offset, size_t count, uint8_t* buffer) {
@@ -456,16 +561,28 @@ namespace Devices::Block {
         // Removes the partition from the filesystem if it is not already removed
 
         if (!ShouldBeRemoved()) {
-            const size_t name_length = GetNameLength();
             const auto name = GetName();
 
             if (name) {
                 Kernel::Exports.deviceInterface->Remove({
-                    .NameLength = name_length,
+                    .NameLength = name.size(),
                     .Name = name.get()
                 });
             }
         }
+
+        if (!filesystemBridge->ShouldBeRemoved()) {
+            const auto bridge_name = GetFSBridgeName();
+
+            if (bridge_name) {
+                Kernel::Exports.partitionInterface->Remove({
+                    .NameLength = bridge_name.size(),
+                    .Name = bridge_name.get()
+                });
+            }
+        }
+
+        filesystemBridge = {};
     }
 
     kern::shared_ptr<Device> Device::AddDevice(const kern::shared_ptr<Interface>& interface) {
@@ -492,7 +609,6 @@ namespace Devices::Block {
             return {};
         }
 
-        const size_t name_length = device->GetNameLength();
         const auto device_name = device->GetName();
         
         if (!device_name) {
@@ -501,7 +617,7 @@ namespace Devices::Block {
         }
 
         if (Kernel::Exports.deviceInterface->AddNode({
-            .NameLength = name_length,
+            .NameLength = device_name.size(),
             .Name = device_name.get()
         }, kern::static_pointer_cast<FS::IFNode>(device)) != FS::Status::SUCCESS) {
             Log::putsSafe("[DEV] Failed to add block device to filesystem");
@@ -614,20 +730,22 @@ namespace Devices::Block {
                     continue;
                 }
 
-                const size_t partition_name_length = partition->GetNameLength();
                 const auto partition_name = partition->GetName();
 
                 if (!partition_name) {
                     Log::putsSafe("[DEV] Failed to allocate block device partition name");
+                    continue;
                 }
                 else {
                     if (Kernel::Exports.deviceInterface->AddNode({
-                        .NameLength = partition_name_length,
+                        .NameLength = partition_name.size(),
                         .Name = partition_name.get()
                     }, static_pointer_cast<FS::IFNode>(partition)) != FS::Status::SUCCESS) {
                         Log::putsSafe("[DEV] Failed to add block device partition to filesystem");
                     }
                 }
+
+                partition->TryMountFilesystem(partition);
             }
         }
         else {
@@ -637,16 +755,13 @@ namespace Devices::Block {
         return device;
     }
 
-    size_t Device::GetNameLength() const {
+    kern::static_string Device::GetName() const {
         // name format is "bdev{deviceId}"
         const size_t root_size = 4;
         const size_t device_id_size = kern::log(deviceId, 10) + 1;
-        return root_size + device_id_size;
-    }
+        const size_t name_length = root_size + device_id_size;
 
-    kern::unique_ptr<char[]> Device::GetName() const {
-        const size_t name_length = GetNameLength();
-        auto name = kern::make_unique<char[]>(name_length);
+        auto name = kern::make_static_string(name_length);
 
         if (name) {
             char* ptr = name.get();
@@ -765,12 +880,11 @@ namespace Devices::Block {
         // self-eject
 
         if (!ShouldBeRemoved()) {
-            const size_t name_length = GetNameLength();
             const auto name = GetName();
 
             if (name) {
                 Kernel::Exports.deviceInterface->Remove({
-                    .NameLength = name_length,
+                    .NameLength = name.size(),
                     .Name = name.get()
                 });
             }
