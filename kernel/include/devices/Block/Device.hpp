@@ -25,8 +25,6 @@
 
 #include <kern/memory.hpp>
 
-/// TODO: Fix race conditions on destruction of partitions and devices.
-
 namespace Devices {
     namespace Block {
         struct GUID {
