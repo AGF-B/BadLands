@@ -148,7 +148,8 @@ namespace {
 Kernel::KernelExports Kernel::Exports = {
     .vfs = nullptr,
     .deviceInterface = {},
-    .keyboardMultiplexerInterface = {}
+    .keyboardMultiplexerInterface = {},
+    .partitionInterface = {}
 };
 
 void BootProcessorInit() {
