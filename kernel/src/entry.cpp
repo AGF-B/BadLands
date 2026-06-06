@@ -198,12 +198,15 @@ LEGACY_EXPORT void KernelEntry() {
 
     static constexpr FS::DirectoryEntry RootEntry = { .NameLength = 2, .Name = "//" };
     static constexpr FS::DirectoryEntry DeviceEntry = { .NameLength = 7, .Name = "Devices" };
+    static constexpr FS::DirectoryEntry PartitionsEntry = { .NameLength = 10, .Name = "Partitions" };
 
     auto response = vfs->Open(RootEntry);
 
     if (response.CheckError()) {
         Panic::PanicShutdown("[ENTRY] Could not open VFS root to create system hierarchy\n\r");
     }
+
+    // create //Devices/ directory for device interfaces to be registered under
 
     auto root = response.GetValue();
 
@@ -221,6 +224,23 @@ LEGACY_EXPORT void KernelEntry() {
 
     auto deviceInterface = response.GetValue();
     Kernel::Exports.deviceInterface = deviceInterface;
+
+    // Create //Partitions/ directory for auto mounted partition filesystem interfaces to be registered under
+
+    status = root->Create(PartitionsEntry, FS::FileType::DIRECTORY);
+
+    if (status != FS::Status::SUCCESS) {
+        Panic::PanicShutdown("[ENTRY] Could not create VFS partition interface\n\r");
+    }
+
+    response = root->Find(PartitionsEntry);
+
+    if (response.CheckError()) {
+        Panic::PanicShutdown("[ENTRY] Could not open VFS partition interface\n\r");
+    }
+
+    auto partitionInterface = response.GetValue();
+    Kernel::Exports.partitionInterface = partitionInterface;
 
     Log::puts("[ENTRY] VFS system hierarchy created\n\r");
 

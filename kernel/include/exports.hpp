@@ -23,6 +23,7 @@ namespace Kernel {
         VFS* vfs;
         kern::shared_ptr<FS::IFNode> deviceInterface;
         kern::shared_ptr<FS::IFNode> keyboardMultiplexerInterface;
+        kern::shared_ptr<FS::IFNode> partitionInterface;
     };
 
     extern KernelExports Exports;
