@@ -323,4 +323,9 @@ namespace kern {
         }
         return shared_ptr<V, P>(other.control, static_cast<V*>(other.ptr));
     }
+
+    template<class V, class U, MemoryProvider P>
+    inline constexpr unique_ptr<V, P> static_pointer_cast(unique_ptr<U, P>&& other) {
+        return unique_ptr<V, P>(static_cast<V*>(other.release()));
+    }
 }
