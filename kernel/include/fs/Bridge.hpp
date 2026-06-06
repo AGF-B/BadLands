@@ -31,6 +31,10 @@ namespace FS {
         virtual Status              Remove(const DirectoryEntry& fileref) final;
         virtual Response<size_t>    List(DirectoryEntry* list, size_t length, size_t from = 0) final;
 
+        virtual Status Query(const QueryInfo& info) final;
+
+        virtual void Unregister() final;
+
         ~Bridge() = default;
     };
 }

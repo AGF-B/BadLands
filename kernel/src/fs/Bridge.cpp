@@ -38,4 +38,12 @@ namespace FS {
     Response<size_t> Bridge::List(DirectoryEntry* list, size_t length, size_t from) {
         return fs->GetRoot()->List(list, length, from);
     }
+
+    Status Bridge::Query(const QueryInfo& info) {
+        return fs->GetRoot()->Query(info);
+    }
+
+    void Bridge::Unregister() {
+        fs->GetRoot()->Unregister();
+    }
 }
