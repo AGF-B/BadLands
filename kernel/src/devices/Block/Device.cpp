@@ -442,7 +442,7 @@ namespace Devices::Block {
     void Partition::TryMountFilesystem(const kern::shared_ptr<Partition>& self) {
         // try to mount a filesystem on the partition, if it fails, it's not a problem, the partition can still be used as a raw block device
 
-        auto filesystem = FileSystem::AutoDetect(kern::static_pointer_cast<FS::IFNode>(self));
+        auto filesystem = FileSystem::AutoDetect(kern::static_pointer_cast<FS::IFNode>(self), interface->GetBlockSize());
 
         if (filesystem) {
             const auto bridge = kern::make_shared<FS::Bridge>(owner, std::move(filesystem));

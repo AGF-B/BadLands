@@ -22,5 +22,5 @@ class FileSystem {
 public:
     virtual kern::shared_ptr<FS::IFNode> GetRoot() = 0;
 
-    static kern::unique_ptr<FileSystem> AutoDetect(const kern::shared_ptr<FS::IFNode>& device);
+    static kern::unique_ptr<FileSystem> AutoDetect(const kern::shared_ptr<FS::IFNode>& device, size_t blockSize);
 };
