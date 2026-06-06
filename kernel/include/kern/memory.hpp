@@ -76,6 +76,8 @@ namespace kern {
         inline constexpr T* operator->() const { return ptr; }
         inline constexpr T& operator*() const { return *ptr; }
         inline constexpr operator bool() const { return ptr != nullptr; }
+
+        inline constexpr size_t size() const = delete;
     };
 
     template<class T, MemoryProvider Provider>
@@ -135,6 +137,8 @@ namespace kern {
         inline constexpr T* operator->() = delete;
         inline constexpr T& operator*() = delete;
         inline constexpr operator bool() const { return ptr != nullptr; }
+
+        inline constexpr size_t size() const { return length; }
 
         inline constexpr T& operator[](size_t i) {
             return ptr[i];
@@ -285,6 +289,12 @@ namespace kern {
         inline constexpr T* operator->() const { return ptr; }
         inline constexpr T& operator*() const { return *ptr; }
         inline constexpr operator bool() const { return ptr != nullptr; }
+    };
+
+    /// TODO: Implement shared_ptr<T[]> and make_shared<T[]>(size_t)
+    template<typename T>
+    class shared_ptr<T[]> {
+        static_assert(sizeof(T) == 0, "shared_ptr<T[]> is not yet implemented");
     };
 
     template<class T, MemoryProvider Provider = Heap, class... Args>
