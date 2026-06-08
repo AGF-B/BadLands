@@ -1654,6 +1654,8 @@ namespace Devices::USB::xHCI {
     }
 
     void Device::Release() {
+        ReleaseDrivers();
+
         if (context_wrapper != nullptr) {
             context_wrapper->Release();
             context_wrapper = nullptr;
@@ -1679,8 +1681,6 @@ namespace Devices::USB::xHCI {
                 endpoint_transfer_rings[i] = nullptr;
             }
         }
-
-        ReleaseDrivers();
 
         current_accesses.store(0);
         unavailable.store(true);
